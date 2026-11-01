@@ -1,0 +1,179 @@
+==================
+DEQ RT configuration
+==================
+!config QSL_RT = true;
+!config QSL_RT_DEFAULT = 16;
+!define MAX: usize = sizeof(u64) * 16 + 2;
+---
+
+(source_file
+  (config_statement
+    (identifier)
+    (identifier))
+  (config_statement
+    (identifier)
+    (number))
+  (define_statement
+    (identifier)
+    (type
+      (identifier))
+    (binary_expression
+      (binary_expression
+        (sizeof_expression
+          (identifier))
+        (number))
+      (number))))
+
+==================
+QPS and inline attributes, exact UTF-8 range
+==================
+&Packet[qps=Q16,opt_table,inline=always] {
+  u64 id;
+  str?(0..100) text|binary_opt=guard|;
+  u16? value;
+}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)
+        (identifier))
+      (attribute
+        (identifier))
+      (attribute
+        (identifier)
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker)
+          (size
+            (range
+              (number)
+              (number))))
+        (identifier)
+        (modifiers
+          (modifier
+            (identifier)
+            (identifier))))
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier)))))
+
+==================
+Nonquantized table and expression bounds
+==================
+&Packet[predict_seq,inline=never] {u32 id;u8? a;u16? b;u32? c;}
+&Text {str(1..sizeof(u64)*16) value|decompress=true|;}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier))
+      (attribute
+        (identifier)
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (struct_body
+      (field
+        (type
+          (identifier)
+          (size
+            (range
+              (number)
+              (binary_expression
+                (sizeof_expression
+                  (identifier))
+                (number)))))
+        (identifier)
+        (modifiers
+          (modifier
+            (identifier)
+            (identifier)))))))
+
+==================
+Nested structure macros retain standalone declarations
+==================
+&Clock[macro] {u64 ticks;}
+&Trace[macro] {Clock stamp;u16 kind;}
+&Packet[safety] {Trace trace;u32 id;u16? extra;}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier))
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier))
+        (identifier))
+      (field
+        (type
+          (identifier))
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier))
+        (identifier))
+      (field
+        (type
+          (identifier))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier)))))

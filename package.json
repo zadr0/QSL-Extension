@@ -1,0 +1,9 @@
+{
+  "name": "tree-sitter-qsl",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for QSL",
+  "license": "MIT",
+  "main": "grammar.js",
+  "scripts": { "generate": "tree-sitter generate", "test": "tree-sitter test", "parse": "tree-sitter parse" },
+  "devDependencies": { "tree-sitter-cli": "0.27.1" }
+}
