@@ -3,4 +3,4 @@
 **/*.wasm
 *.log
 *.exe
-qsl/
+/qsl/
