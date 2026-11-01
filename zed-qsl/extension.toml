@@ -1,0 +1,15 @@
+id = "qsl"
+name = "QSL"
+version = "0.1.0"
+schema_version = 1
+authors = ["ArsaQ <twink.senya13@gmail.com>"]
+description = "Syntax highlighting and error diagnostics for the QSL schema language."
+repository = "https://github.com/zadr0/QSL-Extension"
+
+[grammars.qsl]
+repository = "https://github.com/zadr0/QSL-Extension"
+rev = "3110e783cc7132f047d33ff33db3cc0dad9bb537"
+
+[language_servers.qsl-lsp]
+name = "QSL Language Server"
+languages = ["QSL", "DEQ"]
