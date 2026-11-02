@@ -1,0 +1,17 @@
+// Inspect these schemas using inlay hints, CodeLens, hover or code actions.
+&Packet[opt_table,safety] {
+    u32 id;
+    u8? count;
+    u8? flags;
+}
+
+&Strings[opt_table,safety] {
+    u32 id;
+    str?(3..33) name|binary_opt=guard|;
+    str?(1..255) description|binary_opt=guard|;
+}
+
+&Packed[quant=Q16,safety] {
+    u64(0..15) a;
+    u64(0..15) b;
+}

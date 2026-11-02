@@ -4,6 +4,8 @@
 const fs = require("fs");
 const {spawnSync}=require("child_process");
 const layout=require("./layout-engine");
+const ui=require("./editor-features");
+const i18n=require("./i18n");
 const path = require("path");
 const { fileURLToPath } = require("url");
 
@@ -505,12 +507,14 @@ function positionOffset(text,p){const lines=text.split("\n");let offset=0;for(le
 const analyzerCapabilities=new Map();
 function editorAnalysis(text,uri,opts={}) {
   const report=analyze(text,opts);
-  const executables=[process.env.QSL_ANALYZER,...roots.flatMap(r=>[path.join(r,"qsl","target","release","qsl-analyze.exe"),path.join(r,"qsl","target","release","qsl-analyze")])].filter(Boolean);
-  const command=executables.find(f=>fs.existsSync(f));if(!command)return report;
+  const searchRoots=new Set(roots);try{let dir=path.dirname(fileURLToPath(uri));for(let i=0;i<6;i++){searchRoots.add(dir);const parent=path.dirname(dir);if(parent===dir)break;dir=parent;}}catch{}
+  const executables=[opts.analyzerPath,process.env.QSL_ANALYZER,...[...searchRoots].flatMap(r=>[path.join(r,"qsl","target","release","qsl-analyze.exe"),path.join(r,"qsl","target","release","qsl-analyze"),path.join(r,"target","release","qsl-analyze.exe"),path.join(r,"target","release","qsl-analyze")])].filter(Boolean);
+  const command=executables.find(f=>fs.existsSync(f));report.analyzer=command||null;if(!command)return report;
   if(opts.kind!=="deq"){
     const modified=fs.statSync(command).mtimeMs;let cached=analyzerCapabilities.get(command);
     if(!cached||cached.modified!==modified){let capabilities={};try{const r=spawnSync(command,["--capabilities"],{input:"",encoding:"utf8",timeout:3000,windowsHide:true});capabilities=JSON.parse(r.stdout);}catch{}cached={modified,capabilities};analyzerCapabilities.set(command,cached);}
-    if(cached.capabilities.editorBundle!==1){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
+    report.nativeCapabilities=cached.capabilities;
+    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
   }
   const deqs=[];
   const open=new Map();for(const [u,t] of opts.openDocs||[]){try{if(u.toLowerCase().endsWith(".deq"))open.set(path.resolve(fileURLToPath(u)).toLowerCase(),t);}catch{}}
@@ -525,17 +529,20 @@ function editorAnalysis(text,uri,opts={}) {
     const directories=new Set([dir,path.join(dir,"src"),path.join(path.dirname(dir),"src")]);
     for(const folder of directories){if(!fs.existsSync(folder))continue;for(const entry of fs.readdirSync(folder,{withFileTypes:true})){if(++count>256)break;if(entry.isFile()&&entry.name.endsWith(".rs")){const f=path.join(folder,entry.name),size=fs.statSync(f).size;if(size>1024*1024||total+size>4*1024*1024)continue;total+=size;const u=require("url").pathToFileURL(f).href;if(!macroSources.has(u))macroSources.set(u,fs.readFileSync(f,"utf8"));}}}
   }catch{}
+  report.rustSources=macroSources;
   const rust=[...macroSources.values()].filter(t=>t.length<=1024*1024&&/#\s*\[\s*(?:\w+::)*(?:qsl_macro|schem_macro)\b/.test(t));
   const chunks=[],word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n);return b;},add=s=>{const b=Buffer.from(s);chunks.push(word(b.length),b);};add(text);chunks.push(word(rust.length));for(const r of rust)add(r);
-  let result;try{result=spawnSync(command,opts.kind==="deq"?["--deq-stdin"]:["--editor-bundle",...deqs],{input:opts.kind==="deq"?text:Buffer.concat(chunks),encoding:"utf8",timeout:3000,maxBuffer:1024*1024,windowsHide:true});}catch{return report;}
-  if(result.status!==0)return report;
-  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.diags=report.diags.filter(d=>d.sev!==1&&!(native.rustMacros||[]).some(n=>d.m===`Unknown type '${n}'`));}
-    else{const at=Buffer.from(text).subarray(0,native.offset||0).toString("utf8").length;report.diags=report.diags.filter(d=>d.sev===1);report.diags.push({s:Math.max(0,at-1),e:at,m:native.message,sev:1});}
-  }catch{}return report;
+  let result;try{result=spawnSync(command,opts.kind==="deq"?["--deq-stdin"]:["--editor-bundle",...(opts.generate?["--generate"]:[]),...deqs],{input:opts.kind==="deq"?text:Buffer.concat(chunks),encoding:"utf8",timeout:3000,maxBuffer:8*1024*1024,windowsHide:true});}catch(error){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer failed: ${error.message}`});return report;}
+  if(result.status!==0){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer failed: ${result.error?.message||result.stderr?.trim()||result.status}`});return report;}
+  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.generated=native.generated;report.rustMacros=native.rustMacros||[];report.diags=report.diags.filter(d=>!(native.rustMacros||[]).some(n=>d.m===`Unknown type '${n}'`));}
+    else{const byte=native.offset||Number(/at byte (\d+)/.exec(native.message)?.[1])||0,at=Buffer.from(text).subarray(0,byte).toString("utf8").length;
+      report.plans=[];report.diags.push({s:Math.min(Math.max(0,at-1),Math.max(0,text.length-1)),e:Math.min(Math.max(1,at),text.length),m:native.message,sev:1});}
+  }catch(error){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer returned invalid JSON: ${error.message}`});}
+  return report;
 }
 
 // ---- workspace .deq discovery ----------------------------------------------
-let roots = [];
+let roots = process.env.QSL_WORKTREE_ROOT?[process.env.QSL_WORKTREE_ROOT]:[];
 const SKIP_DIRS = new Set(["node_modules", "target", "dist", "build", "out"]);
 const norm = (f) => (process.platform === "win32" ? path.resolve(f).toLowerCase() : path.resolve(f));
 let fileList = { list: [], t: 0 };
@@ -608,103 +615,101 @@ function toLsp(text, diags) {
 }
 
 function main() {
-  const docs = new Map();
-  const send = (msg) => {
-    const s = JSON.stringify({ jsonrpc: "2.0", ...msg });
-    process.stdout.write(`Content-Length: ${Buffer.byteLength(s)}\r\n\r\n${s}`);
-  };
-  const isDeq = (uri) => uri.toLowerCase().endsWith(".deq");
-  const publish = (uri) => {
-    const text = docs.get(uri);
-    let diagnostics = [];
-    if (text !== undefined) {
-      const kind = isDeq(uri) ? "deq" : "qsl";
-      const known = workspaceDefines(docs);
-      const report=editorAnalysis(text,uri,{kind,known,openDocs:docs});
-      diagnostics = toLsp(text,report.diags);
-      for(const plan of report.plans){const st=report.structs.find(s=>s.name.x===plan.name);if(!st)continue;
-        diagnostics.push(...toLsp(text,[{s:st.name.s,e:st.name.e,sev:3,m:`${plan.maximum===null?"Unbounded":`Max ${plan.maximum} B`}; RT ${plan.rtEligible?`eligible (${plan.slots} slots)`:"unavailable"}; ${plan.qps?`D ${plan.dBits}/32 bits; Q${plan.quantum}, index ${plan.indexBytes}/${plan.plainIndexBytes} B`:plan.reason}. Hover for build plan.`}]));}
-    }
-    send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics } });
-  };
-  const publishQslDocs = () => { for (const uri of docs.keys()) if (!isDeq(uri)) publish(uri); };
-
-  function handle(m) {
-    switch (m.method) {
-      case "initialize": {
-        const pr = m.params || {};
-        const folders = (pr.workspaceFolders || []).map((f) => f.uri);
-        if (!folders.length && pr.rootUri) folders.push(pr.rootUri);
-        roots = [];
-        for (const u of folders) { try { roots.push(fileURLToPath(u)); } catch { /* ignore */ } }
-        return send({ id: m.id, result: {
-          capabilities: { textDocumentSync: { openClose: true, change: 1 },hoverProvider:true,codeActionProvider:true },
-          serverInfo: { name: "qsl-lsp", version: "0.1.0" },
-        } });
-      }
-      case "textDocument/hover": {
-        const {textDocument,position}=m.params;const text=docs.get(textDocument.uri);
-        if(text===undefined)return send({id:m.id,result:null});
-        const report=editorAnalysis(text,textDocument.uri,{kind:isDeq(textDocument.uri)?"deq":"qsl",known:workspaceDefines(docs),openDocs:docs});
-        const at=positionOffset(text,position),st=report.structs.find(s=>s.start<=at&&at<=s.end);
-        const plan=st&&report.plans.find(p=>p.name===st.name.x);
-        return send({id:m.id,result:plan?{contents:{kind:"markdown",value:layout.describe(plan)}}:null});
-      }
-      case "textDocument/codeAction": {
-        const uri=m.params.textDocument.uri,text=docs.get(uri);if(text===undefined)return send({id:m.id,result:[]});
-        const report=analyze(text),actions=[];
-        for(const st of report.structs){const fields=[...st.fields.values()],first=fields.find(f=>f.type.optional);if(!first)continue;
-          for(const f of fields.filter(f=>!f.type.optional&&f.start>first.start))actions.push({title:`Move '${f.name.x}' before optional fields (wire format changes)`,kind:"quickfix",edit:{changes:{[uri]:[
-            {range:{start:offsetPosition(text,f.start),end:offsetPosition(text,f.end)},newText:""},
-            {range:{start:offsetPosition(text,first.start),end:offsetPosition(text,first.start)},newText:text.slice(f.start,f.end)+"\n    "}
-          ]}}});}
-        return send({id:m.id,result:actions});
-      }
-      case "shutdown": return send({ id: m.id, result: null });
-      case "exit": return process.exit(0);
-      case "textDocument/didOpen": {
-        const d = m.params.textDocument;
-        docs.set(d.uri, d.text);
-        publish(d.uri);
-        if (isDeq(d.uri)) publishQslDocs();
-        return;
-      }
-      case "textDocument/didChange": {
-        const uri = m.params.textDocument.uri;
-        const ch = m.params.contentChanges;
-        docs.set(uri, ch[ch.length - 1].text);
-        publish(uri);
-        if (isDeq(uri)) publishQslDocs();
-        return;
-      }
-      case "textDocument/didClose": {
-        const uri = m.params.textDocument.uri;
-        docs.delete(uri);
-        send({ method: "textDocument/publishDiagnostics", params: { uri, diagnostics: [] } });
-        if (isDeq(uri)) publishQslDocs();
-        return;
-      }
-      default:
-        if (m.id !== undefined && m.method)
-          send({ id: m.id, error: { code: -32601, message: "Method not found" } });
-    }
+ const docs=new Map(),versions=new Map(),cache=new Map(),pending=new Map();let options={},language="en",clientLocale="",clientCaps={},seq=0,epoch=0,queue=Promise.resolve();
+ const send=msg=>{const body=JSON.stringify({jsonrpc:"2.0",...msg});process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);};
+ const reply=(id,result)=>send({id,result});
+ const request=(method,params)=>new Promise((resolve,reject)=>{const id=`qsl-${++seq}`,timer=setTimeout(()=>{pending.delete(id);reject(new Error(`${method}: timeout`));},5000);pending.set(id,{resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}});send({id,method,params});});
+ const isDeq=uri=>uri.toLowerCase().endsWith(".deq");
+ const configure=value=>{options={...options,...(value||{})};language=i18n.select(options,clientLocale);epoch++;cache.clear();};
+ const analyzeDoc=(uri,generate=false)=>{
+  const text=docs.get(uri);if(text===undefined)return null;const key=`${epoch}:${versions.get(uri)||0}`;
+  if(!generate&&cache.get(uri)?.key===key)return cache.get(uri).report;
+  const report=editorAnalysis(text,uri,{kind:isDeq(uri)?"deq":"qsl",known:workspaceDefines(docs),openDocs:docs,analyzerPath:options.analyzerPath,generate});
+  // Incorrect partial declarations must not acquire authoritative layout hints.
+  report.plans=report.plans.filter(p=>{const st=report.structs.find(s=>s.name.x===p.name);return st&&!report.diags.some(d=>d.sev===1&&d.s>=st.start&&d.s<st.end);});
+  if(!generate)cache.set(uri,{key,report});return report;
+ };
+ const publish=uri=>{
+  const text=docs.get(uri);let diagnostics=[];
+  if(text!==undefined){try{const report=analyzeDoc(uri);diagnostics=toLsp(text,report.diags.map(d=>({...d,m:i18n.diagnostic(d.m,language)})));
+   diagnostics.forEach((d,i)=>{d.code=report.diags[i].sev===1?"QSL_ERROR":"QSL_WARNING";d.data={originalMessage:report.diags[i].m,version:versions.get(uri)};});
+  }catch(error){process.stderr.write(`[qsl-lsp] ${error.stack}\n`);diagnostics=toLsp(text,[{s:0,e:Math.min(text.length,1),sev:1,m:i18n.t(language,"analysisError",{error:error.message})}]);}}
+  send({method:"textDocument/publishDiagnostics",params:{uri,version:versions.get(uri),diagnostics}});
+ };
+ const refresh=()=>{epoch++;cache.clear();for(const uri of docs.keys())publish(uri);for(const [cap,method]of [[clientCaps.workspace?.inlayHint?.refreshSupport,"workspace/inlayHint/refresh"],[clientCaps.workspace?.codeLens?.refreshSupport,"workspace/codeLens/refresh"]])if(cap)request(method).catch(e=>process.stderr.write(`[qsl-lsp] ${e.message}\n`));};
+ const pos=(text,at)=>offsetPosition(text,at);
+ const range=(text,a,b)=>({start:pos(text,a),end:pos(text,b)});
+ const selected=(report,text,position)=>{const at=positionOffset(text,position);return report.structs.find(s=>s.start<=at&&at<=s.end);};
+ const diagnosticFailure=(m,error)=>{process.stderr.write(`[qsl-lsp] ${m.method}: ${error.stack||error}\n`);if(m.id!==undefined)send({id:m.id,error:{code:-32603,message:i18n.t(language,"analysisError",{error:error.message||String(error)})}});else if(m.params?.textDocument?.uri){const uri=m.params.textDocument.uri,text=docs.get(uri)||"";send({method:"textDocument/publishDiagnostics",params:{uri,diagnostics:toLsp(text,[{s:0,e:Math.min(1,text.length),sev:1,m:i18n.t(language,"analysisError",{error:error.message})}])}});}};
+ async function handle(m){
+  const params=m.params||{};
+  if(m.method==="initialize"){
+   clientLocale=params.locale||"";clientCaps=params.capabilities||{};configure(params.initializationOptions||{});
+   const folders=(params.workspaceFolders||[]).map(f=>f.uri);if(!folders.length&&params.rootUri)folders.push(params.rootUri);
+   if(folders.length){roots=[];for(const u of folders)try{roots.push(fileURLToPath(u));}catch{}}
+   return reply(m.id,{capabilities:{positionEncoding:"utf-16",textDocumentSync:{openClose:true,change:1,save:{includeText:false}},hoverProvider:true,codeActionProvider:true,inlayHintProvider:{resolveProvider:false},codeLensProvider:{resolveProvider:true},documentSymbolProvider:true,definitionProvider:true,completionProvider:{triggerCharacters:["[",",","=","|","!"],resolveProvider:false},foldingRangeProvider:true,executeCommandProvider:{commands:["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust","qsl.setLanguage"]},workspace:{workspaceFolders:{supported:true,changeNotifications:true}}},serverInfo:{name:"qsl-lsp",version:"0.4.0"}});
   }
-  let buf = Buffer.alloc(0);
-  process.stdin.on("data", (chunk) => {
-    buf = Buffer.concat([buf, chunk]);
-    for (;;) {
-      const he = buf.indexOf("\r\n\r\n");
-      if (he < 0) return;
-      const mm = /Content-Length: *(\d+)/i.exec(buf.slice(0, he).toString("ascii"));
-      if (!mm) { buf = buf.slice(he + 4); continue; }
-      const total = he + 4 + Number(mm[1]);
-      if (buf.length < total) return;
-      const body = buf.slice(he + 4, total).toString("utf8");
-      buf = buf.slice(total);
-      try { handle(JSON.parse(body)); } catch (e) { /* ignore malformed */ }
-    }
-  });
+  if(m.method==="initialized"){
+   if(clientCaps.workspace?.didChangeWatchedFiles?.dynamicRegistration)request("client/registerCapability",{registrations:[{id:"qsl-inputs",method:"workspace/didChangeWatchedFiles",registerOptions:{watchers:[{globPattern:"**/*.deq"},{globPattern:"**/*.rs"},{globPattern:"**/*.qsl"}]}}]}).catch(e=>process.stderr.write(`[qsl-lsp] ${e.message}\n`));return;
+  }
+  if(m.method==="workspace/didChangeConfiguration"){const value=params.settings||{};configure(value["qsl-lsp"]||value.qsl||value);refresh();return;}
+  if(m.method==="workspace/didChangeWatchedFiles"){fileList.t=0;defCache.clear();refresh();return;}
+  if(m.method==="workspace/didChangeWorkspaceFolders"){const removed=new Set((params.event?.removed||[]).map(f=>{try{return fileURLToPath(f.uri);}catch{return "";}}));roots=roots.filter(r=>!removed.has(r));for(const f of params.event?.added||[])try{roots.push(fileURLToPath(f.uri));}catch{}fileList.t=0;refresh();return;}
+  if(m.method==="textDocument/didOpen"){const d=params.textDocument;docs.set(d.uri,d.text);versions.set(d.uri,d.version||0);cache.delete(d.uri);if(isDeq(d.uri))refresh();else publish(d.uri);return;}
+  if(m.method==="textDocument/didChange"){
+   const uri=params.textDocument.uri;let text=docs.get(uri)||"";
+   for(const change of params.contentChanges||[]){if(change.range){const start=positionOffset(text,change.range.start),end=positionOffset(text,change.range.end);text=text.slice(0,start)+change.text+text.slice(end);}else text=change.text;}
+   docs.set(uri,text);versions.set(uri,params.textDocument.version??((versions.get(uri)||0)+1));cache.delete(uri);if(isDeq(uri))refresh();else publish(uri);return;
+  }
+  if(m.method==="textDocument/didSave"){if(params.text!==undefined)docs.set(params.textDocument.uri,params.text);refresh();return;}
+  if(m.method==="textDocument/didClose"){const uri=params.textDocument.uri;docs.delete(uri);versions.delete(uri);cache.delete(uri);send({method:"textDocument/publishDiagnostics",params:{uri,diagnostics:[]}});if(isDeq(uri))refresh();return;}
+  if(m.method==="shutdown")return reply(m.id,null);if(m.method==="exit")return process.exit(0);
+  if(m.method==="workspace/executeCommand"){
+   if(params.command==="qsl.setLanguage"){configure({language:params.arguments?.[0]?.language||"auto"});refresh();return reply(m.id,null);}
+   const arg=params.arguments?.[0]||{},text=docs.get(arg.uri),report=text===undefined?null:analyzeDoc(arg.uri,params.command==="qsl.expandRust"),st=report?.structs.find(s=>s.name.x===arg.schema),p=report?.plans.find(p=>p.name===arg.schema);
+   if(!p||!st)throw new Error(i18n.t(language,"invalid"));
+   if(!clientCaps.window?.showDocument?.support)throw new Error(i18n.t(language,"noShowDocument"));
+   if(!["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust"].includes(params.command))throw new Error("Unknown command");
+   const rust=params.command==="qsl.expandRust",content=rust?report.generated:ui.inspect(st,p,language,params.command==="qsl.inspectEvents");if(!content)throw new Error(i18n.t(language,"generateError"));
+   const directory=process.env.QSL_ANALYSIS_DIR||path.join(__dirname,".analysis");fs.mkdirSync(directory,{recursive:true});const hash=require("crypto").createHash("sha256").update(arg.uri).digest("hex").slice(0,12),file=path.join(directory,`${hash}-${p.name}-${rust?"generated.rs":params.command==="qsl.inspectEvents"?"events.md":"layout.md"}`);fs.writeFileSync(file,content);
+   const uri=require("url").pathToFileURL(file).href;const shown=await request("window/showDocument",{uri,takeFocus:true,external:false});if(!shown?.success)throw new Error(i18n.t(language,"noShowDocument"));return reply(m.id,{uri});
+  }
+  if(m.method==="codeLens/resolve")return reply(m.id,params);
+  const uri=params.textDocument?.uri,text=docs.get(uri);if(text===undefined){if(m.id!==undefined)return reply(m.id,["textDocument/hover","textDocument/definition"].includes(m.method)?null:[]);return;}
+  const report=analyzeDoc(uri);
+  if(m.method==="textDocument/hover"){
+   const st=selected(report,text,params.position),p=st&&report.plans.find(p=>p.name===st.name.x),at=positionOffset(text,params.position),f=st&&[...st.fields.values()].find(f=>f.start<=at&&at<=f.end);
+   return reply(m.id,p?{contents:{kind:"markdown",value:f?ui.fieldHover(st,p,f.name.x,language)||ui.schemaHover(st,p,language):ui.schemaHover(st,p,language)},range:f?range(text,f.name.s,f.name.e):range(text,st.name.s,st.name.e)}:null);
+  }
+  if(m.method==="textDocument/inlayHint"){const hints=ui.hints(report,text,language,options.inlayHints||{},at=>pos(text,at));return reply(m.id,params.range?hints.filter(h=>positionOffset(text,h.position)>=positionOffset(text,params.range.start)&&positionOffset(text,h.position)<=positionOffset(text,params.range.end)):hints);}
+  if(m.method==="textDocument/codeLens"){const lenses=[];if(options.codeLens!==false)for(const st of report.structs){const p=report.plans.find(p=>p.name===st.name.x);if(!p)continue;const entry=(command,title)=>lenses.push({range:range(text,st.name.s,st.name.e),command:{command,title,arguments:[{uri,schema:p.name}]}});entry("qsl.inspectLayout",`${ui.frameSize(st,p,language)} · ${i18n.t(language,"layout")}`);if(p.lengthGraph)entry("qsl.inspectEvents",`${p.lengthGraph.events.length} · ${i18n.t(language,"events")}`);if(report.analyzer&&!p.approximate)entry("qsl.expandRust",i18n.t(language,"generated"));}return reply(m.id,lenses);}
+  if(m.method==="textDocument/documentSymbol")return reply(m.id,[...report.structs.map(st=>({name:st.name.x,kind:23,range:range(text,st.start,st.end),selectionRange:range(text,st.name.s,st.name.e),children:[...st.fields.values()].map(f=>({name:f.name.x,detail:`${f.type.name.x}${f.type.optional?"?":""}`,kind:8,range:range(text,f.start,f.end),selectionRange:range(text,f.name.s,f.name.e)}))})),...report.defines.map(d=>({name:d.name.x,kind:14,range:range(text,d.name.s,d.value.e),selectionRange:range(text,d.name.s,d.name.e)}))]);
+  if(m.method==="textDocument/foldingRange")return reply(m.id,report.structs.map(st=>({startLine:pos(text,st.start).line,endLine:pos(text,st.end).line,kind:"region"})).filter(r=>r.endLine>r.startLine));
+  if(m.method==="textDocument/completion")return reply(m.id,ui.completions(report,text,positionOffset(text,params.position),language));
+  if(m.method==="textDocument/definition"){
+   const at=positionOffset(text,params.position),token=[...text.matchAll(/!?[A-Za-z_][A-Za-z0-9_]*/g)].find(m=>m.index<=at&&at<=m.index+m[0].length)?.[0],out=[];
+   if(token){const sources=new Map(docs);for(const f of fileList.list)try{const u=require("url").pathToFileURL(f).href;if(!sources.has(u)&&fs.statSync(f).size<=1024*1024)sources.set(u,fs.readFileSync(f,"utf8"));}catch{}
+    for(const [u,source]of sources){const other=analyze(source,{kind:isDeq(u)?"deq":"qsl"});for(const target of token.startsWith("!")?other.defines:other.structs)if(target.name.x===token.replace(/^!/,""))out.push({uri:u,range:range(source,target.name.s,target.name.e)});}
+    if(!token.startsWith("!")&&(report.rustMacros||[]).includes(token))for(const [u,source]of report.rustSources||[]){const re=new RegExp("\\bstruct\\s+("+token+")\\b","g");for(const match of source.matchAll(re)){const start=match.index+match[0].lastIndexOf(token);out.push({uri:u,range:range(source,start,start+token.length)});}}
+   }return reply(m.id,out);
+  }
+  if(m.method==="textDocument/codeAction"){
+   const actions=[];for(const st of report.structs){if(params.range&&(positionOffset(text,params.range.end)<st.start||positionOffset(text,params.range.start)>st.end))continue;
+    const fields=[...st.fields.values()],first=fields.find(f=>f.type.optional);
+    if(first)for(const f of fields.filter(f=>!f.type.optional&&f.start>first.start))actions.push({title:i18n.t(language,"move",{name:f.name.x}),kind:"quickfix",edit:{changes:{[uri]:[{range:range(text,f.start,f.end),newText:""},{range:range(text,first.start,first.start),newText:text.slice(f.start,f.end)+"\n    "}]}}});
+    const p=report.plans.find(p=>p.name===st.name.x);
+    if(p?.suggestFixedPrefix){const variable=f=>{const row=ui.wire(st,p).fields.find(r=>r.name===f.name.x);return !row||row.minBits===null||row.maxBits===null||row.minBits!==row.maxBits;},required=fields.filter(f=>!f.type.optional),reordered=[...required.filter(f=>!variable(f)),...required.filter(variable),...fields.filter(f=>f.type.optional)];
+      if(fields.length&&reordered.some((f,i)=>f!==fields[i])&&!fields.slice(1).some((f,i)=>text.slice(fields[i].end,f.start).trim()))actions.push({title:i18n.t(language,"fixedFirst"),kind:"refactor.rewrite",edit:{changes:{[uri]:[{range:range(text,fields[0].start,fields.at(-1).end),newText:reordered.map(f=>text.slice(f.start,f.end)).join("\n    ")}]}}});}
+    if(p){for(const [command,key]of [["qsl.inspectLayout","layout"],...(p.lengthGraph?[["qsl.inspectEvents","eventAction"]]:[]),...(report.analyzer&&!p.approximate?[["qsl.expandRust","generated"]]:[])])actions.push({title:i18n.t(language,key),kind:"refactor.rewrite",command:{command,title:i18n.t(language,key),arguments:[{uri,schema:p.name}]}});}
+   }if(report.plans.length)actions.push({title:i18n.t(language,language==="ru"?"switchEn":"switchRu"),kind:"source",command:{command:"qsl.setLanguage",title:"QSL language",arguments:[{language:language==="ru"?"en":"ru"}]}});return reply(m.id,actions);
+  }
+  if(m.id!==undefined)send({id:m.id,error:{code:-32601,message:"Method not found"}});
+ }
+ let buf=Buffer.alloc(0);
+ process.stdin.on("data",chunk=>{buf=Buffer.concat([buf,chunk]);for(;;){const end=buf.indexOf("\r\n\r\n");if(end<0)return;const match=/Content-Length: *(\d+)/i.exec(buf.subarray(0,end).toString("ascii"));if(!match){buf=buf.subarray(end+4);continue;}const length=Number(match[1]);if(!Number.isSafeInteger(length)||length>16*1024*1024){process.stderr.write("[qsl-lsp] Oversized LSP message\n");process.exit(1);}const total=end+4+length;if(buf.length<total)return;const body=buf.subarray(end+4,total).toString("utf8");buf=buf.subarray(total);let m;try{m=JSON.parse(body);}catch(error){process.stderr.write(`[qsl-lsp] Invalid JSON: ${error.message}\n`);continue;}
+  if(!m.method&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);if(m.error)p.reject(new Error(m.error.message));else p.resolve(m.result);continue;}
+  queue=queue.then(()=>handle(m)).catch(error=>diagnosticFailure(m,error));
+ }});
 }
-
-if (require.main === module) main();
-else module.exports = { analyze,editorAnalysis };
+if(require.main===module)main();
+else module.exports={analyze,editorAnalysis};

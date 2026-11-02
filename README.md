@@ -1,5 +1,9 @@
 # QSL grammar and Zed extension
 
+[Interactive editor guide (EN)](docs/EDITOR_EN.md) · [Интерактивный анализатор (RU)](docs/EDITOR_RU.md)
+
+Version 0.4 adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
+
 Tree-sitter grammar is at the repository root; the complete Zed extension is in `zed-qsl/`.
 
 Supported additions: `qps`, `qps=Q2|Q4|Q8|Q16`, exact numeric payload `quant=Q2|Q4|Q8|Q16`, unquantized `predict_seq`, static `opt_table`, schema-controlled `inline`, `inline=hint|always|never`, and DEQ generation configuration:
@@ -49,7 +53,7 @@ QSL_RT_DEFAULT is a slot count, not bytes. Only finite-size schemas receive stat
 ```powershell
 tree-sitter generate --abi 14
 tree-sitter test
-node --test zed-qsl/server/test.js
+node --test zed-qsl/server/test.js zed-qsl/server/editor.test.js
 cargo build --manifest-path zed-qsl/Cargo.toml --target wasm32-wasip2 --release --locked
 ```
 

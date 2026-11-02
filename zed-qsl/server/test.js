@@ -14,7 +14,7 @@ test("exact quantum plans, pool bounds, inline modes",()=>{
   for(const q of [1,2,4,8,16]){
     const a=analyze(`&A[qps=Q${q},inline=never]{u32 id;u8? a;u16? b;u32? c;}`);
     assert.equal(a.diags.filter(d=>d.sev===1).length,0);assert.equal(a.plans[0].maximum,15);assert.equal(a.plans[0].dBits,3);assert.equal(a.plans[0].indexBytes,Math.ceil(8/q)*4);
-    assert.match(describe(a.plans[0]),/32 бит/);
+    assert.match(describe(a.plans[0]),/32 (?:bits|бит)/);
   }
   assert.equal(analyze("&A{str value;}").plans[0].rtEligible,false);
   assert(analyze("&A[qps=Q16]{u8? a;u8? b;}").diags.some(d=>/cannot reconstruct/.test(d.m)));
@@ -50,7 +50,7 @@ test("exact numerical payload plans retain both operands and show raw fallback",
   const fields="{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64(0..15) d;}";
   for(const q of [2,4,8,16]){
     const a=analyze(`&A[quant=Q${q},safety]`+fields);assert.equal(a.diags.filter(d=>d.sev===1).length,0,JSON.stringify(a.diags));
-    assert.equal(a.plans[0].payloadQuantActive,true);assert.equal(a.plans[0].maximum,2);assert.equal(a.plans[0].payloadPadding,1);assert.match(describe(a.plans[0]),/остаток сохранены/);
+    assert.equal(a.plans[0].payloadQuantActive,true);assert.equal(a.plans[0].maximum,2);assert.equal(a.plans[0].payloadPadding,1);assert.match(describe(a.plans[0]),/quotient and remainder retained/);
   }
   assert.equal(analyze("&A[quant=Q16]{u64 a;}").plans[0].payloadQuantActive,false);
   assert(analyze("&A[quant=Q3]{u64 a;}").diags.some(d=>d.sev===1));

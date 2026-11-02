@@ -11,6 +11,6 @@ jobs:
       - run: npm install
       - run: npx tree-sitter generate --abi 14
       - run: npx tree-sitter test
-      - run: node --test zed-qsl/server/test.js
+      - run: node --test zed-qsl/server/test.js zed-qsl/server/editor.test.js
       - run: rustup target add wasm32-wasip2
       - run: cargo build --manifest-path zed-qsl/Cargo.toml --target wasm32-wasip2 --release --locked

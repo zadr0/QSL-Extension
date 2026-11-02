@@ -125,24 +125,13 @@ function analyzeLayout(structs, configs = {}) {
     if(payload.payloadQuantActive){maximum=payload.payloadMaximum;if(Object.hasOwn(attrs,"predict_seq")&&!staticOptional)error(s.name,"quant cannot infer field presence from compressed byte length; use opt_table or qps");if(qps&&quantum!==1)error(s.name,"Payload bit-prefix graphs use direct D, not Q_table length lookup; combine quant with plain qps");}
     const slots=Number(configs.QSL_RT_DEFAULT||16),eligible=maximum!==null&&(maximum+payload.payloadPadding)*slots<=64*1024*1024;
     const mode=payload.payloadQuantActive&&staticOptional?"packed bit-prefix Boolean graph":staticOptional?(plainIndexBytes?"static critical lengths; no wire directory":"static prefix graph with presence bits or EOF predicate; no wire directory"):attrs.opt_table==="legacy"?"legacy wire offset directory":"disabled";
-    plans.push({name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:staticOptional&&Object.hasOwn(attrs,"predict_seq"),optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:Object.hasOwn(attrs,"safety"),suggestFixedPrefix,approximate:true});
+    plans.push({sourceFields:fields,compact:Object.hasOwn(attrs,"compact"),name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:staticOptional&&Object.hasOwn(attrs,"predict_seq"),optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:Object.hasOwn(attrs,"safety"),suggestFixedPrefix,approximate:true});
   }
   return {plans,diags};
 }
-function describe(p) {
-  return [
-    `**${p.name} · QSL build plan${p.approximate ? " (предварительный)" : ""}**`,
-    `Максимум кадра: ${p.maximum === null ? "не ограничен статически" : `${p.maximum} B`}. Optional-полей: ${p.optionalCount}.`,
-    `RT: ${p.rtEligible ? `доступен при QSL_RT=true, ${p.slots} буферов; исчерпание → PoolExhausted` : `недоступен: ${p.rtReason||"задайте конечные границы строк/массивов и размеры custom codec"}`}.`,
-    p.qps ? `QPS: D занимает 4 B, использовано ${p.dBits}/32 бит. Данные и длины точные.` : "QPS выключен: формат метаданных задаёт выбранный кодек.",
-    p.plainIndexBytes ? `Таблица индексов Q${p.quantum}: ${p.indexBytes} B вместо ${p.plainIndexBytes} B. Это сжатие таблицы, без потери payload. Скорость определяется измерением.` : p.payloadQuantActive?"Адресация payload: статический битовый префикс по булевым признакам присутствия.":`Стратегия: ${p.reason}.`,
-    `Inline: ${p.inline}.`,
-    ...(p.staticOptional&&p.staticOptional!=="disabled"?[`opt_table: ${p.staticOptional}.`]:[]),
-    ...(p.payloadQuantRequested?[p.payloadQuantActive?`Payload quant=Q${p.payloadQuantum}: максимум ${p.payloadMaximum} B вместо ${p.rawMaximum} B; отдельно ${p.payloadPadding} B инициализированного хвоста (не передаётся). Частное и остаток сохранены полностью. Восстановление идёт в отдельный нативный буфер; подготовленные области используются повторно.`:`Payload: raw fallback. ${p.payloadReason}.`]:[]),
-    ...(p.lengthGraph?[`Payload имеет размер L. I — числовой индекс события: ${p.lengthGraph.events.length<=33?["0",...p.lengthGraph.events.slice(1).map(e=>`(L > ${e.start-1}) as usize`)].join(" + "):"иерархическая сумма числовых признаков границ"}. Метаобласть: ${p.lengthGraph.metadataBytes} B, из них теги ${p.lengthGraph.tagBytes} B. Однозначные события не читают теги; длины строк — нативные слова вне payload.`,p.predictSequenceHint?"Predict_Sequence: прямые выражения вместо косвенного вызова; Rust inlining отдельно задаётся атрибутом inline.":"Индекс выбирает специализированную функцию в статической EVENT_TABLE."]:[]),
-    `Проверка входных данных: ${p.safety?"доступна через checked API ([safety])":"выключена; включается атрибутом [safety]"}. Порядок optional-хвоста: ${p.optionalTailRequired?"обязателен для всех схем":"свободный, прежний формат"}.`,
-    ...(p.strings||[]),
-    p.suggestFixedPrefix ? "Можно вынести фиксированные обязательные поля перед переменными, сохранив optional-хвост. Это изменит формат: обновите обе стороны соединения." : "Порядок полей сохраняется точно по схеме."
-  ].join("\n\n");
+function describe(p,language="en") {
+  const ui=require("./editor-features"),{t,diagnostic}=require("./i18n");
+  const st={name:{x:p.name},fields:new Map((p.sourceFields||[]).map(f=>[f.name.x,f])),attrs:p.compact?{compact:""}:{}};
+  return ui.schemaHover(st,p,language)+`\n\n**${t(language,"strategy")}**: ${diagnostic(p.staticOptional&&p.staticOptional!=="disabled"?p.staticOptional:p.reason,language)}`+(p.lengthGraph?`\n\n\`I = ${ui.formula(p)}\``:"");
 }
 module.exports={analyzeLayout,describe};
