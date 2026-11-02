@@ -11,7 +11,7 @@
     str?(1..255) description|binary_opt=guard|;
 }
 
-&Packed[quant=Q16,safety] {
+&Packed[qps=Q16,safety] {
     u64(0..15) a;
     u64(0..15) b;
 }

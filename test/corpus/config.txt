@@ -192,3 +192,54 @@ Independent exact payload and static optional graph attributes
               (number)
               (number))))
         (identifier)))))
+
+==================
+Required-only QPS defaults and explicit legacy state bits
+==================
+&A[qps] {u8(0..15) value;}
+&B[qps=Q16] {u8(0..15) value;}
+&C[state_bits=Q4] {u8? value;}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier)
+          (size
+            (range
+              (number)
+              (number))))
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)
+        (quantum)))
+    (struct_body
+      (field
+        (type
+          (identifier)
+          (size
+            (range
+              (number)
+              (number))))
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)
+        (quantum)))
+    (struct_body
+      (field
+        (type
+          (identifier)
+          (optional_marker))
+        (identifier)))))

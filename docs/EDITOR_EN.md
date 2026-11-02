@@ -2,7 +2,7 @@
 
 [Русский](EDITOR_RU.md)
 
-QSL 0.4 uses standard editor features instead of a single prose tooltip.
+QSL 0.5 uses standard editor features instead of a single prose tooltip.
 
 | Where | What is shown |
 |---|---|
@@ -70,3 +70,9 @@ cargo build --manifest-path zed-qsl/Cargo.toml --target wasm32-wasip2 --release 
 Protocol tests check both languages, changing/fixing errors, inlays, field hovers, outline, completions, definitions, configuration changes, UTF-16 edits and opening layout/generated source. Native-specific tests are explicitly skipped without an adjacent native analyzer.
 
 With the default Windows Zed keymap, `Ctrl+.` opens code actions.
+
+## QPS and prediction
+
+`[qps]` means exact operand compression with Q16 by default; explicit Q2/Q4/Q8/Q16 and the `quant=Qn` alias are supported. Required-only schemas are valid. `opt_table` independently predicts optional states from length; it is not part of QPS. The old D/index format is explicitly `state_bits`. Both endpoints must agree on codec and quantum. Matching native analysis requires codec revision 2; older analyzers leave labelled preliminary estimates.
+
+Rust macro references show a group inlay with the number of expanded fields. Their hover lists every flattened member, size and offset; it never assigns the first member's size to the whole group.

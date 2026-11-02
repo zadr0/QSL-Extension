@@ -12,13 +12,13 @@ test("optional tail constraint and advisory wire migration",()=>{
 });
 test("exact quantum plans, pool bounds, inline modes",()=>{
   for(const q of [1,2,4,8,16]){
-    const a=analyze(`&A[qps=Q${q},inline=never]{u32 id;u8? a;u16? b;u32? c;}`);
+    const a=analyze(`&A[state_bits=Q${q},inline=never]{u32 id;u8? a;u16? b;u32? c;}`);
     assert.equal(a.diags.filter(d=>d.sev===1).length,0);assert.equal(a.plans[0].maximum,15);assert.equal(a.plans[0].dBits,3);assert.equal(a.plans[0].indexBytes,Math.ceil(8/q)*4);
     assert.match(describe(a.plans[0]),/32 (?:bits|бит)/);
   }
   assert.equal(analyze("&A{str value;}").plans[0].rtEligible,false);
-  assert(analyze("&A[qps=Q16]{u8? a;u8? b;}").diags.some(d=>/cannot reconstruct/.test(d.m)));
-  assert(analyze("&A[qps=Q3]{u8? a;}").diags.some(d=>d.sev===1));
+  assert(analyze("&A[state_bits=Q16]{u8? a;u8? b;}").diags.some(d=>/cannot reconstruct/.test(d.m)));
+  assert(analyze("&A[state_bits=Q3]{u8? a;}").diags.some(d=>d.sev===1));
 });
 test("compression and field modifiers are retained",()=>{
   const a=analyze("&A{str(0..100) a|binary_opt=guard|;str?(0..255) b|decompress=true|;}");
@@ -66,7 +66,7 @@ test("native payload and static graph plans match the generator",{skip:!fs.exist
 test("native generator plans agree with advisory quantum analysis",{skip:!fs.existsSync(native)},()=>{
   const previous=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
   try {for(const q of [1,2,4,8,16]){
-    const source=`&A[qps=Q${q}]{u32 id;u8? a;u16? b;u32? c;}`;
+    const source=`&A[state_bits=Q${q}]{u32 id;u8? a;u16? b;u32? c;}`;
     const result=editorAnalysis(source,"file:///tmp/test.qsl",{kind:"qsl"});assert(!result.plans[0].approximate);assert.equal(result.plans[0].indexBytes,Math.ceil(8/q)*4);assert.equal(result.plans[0].maximum,15);
   }}finally{if(previous===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=previous;}
 });
@@ -99,11 +99,26 @@ test("LSP stdio: diagnostics, hover and optional-tail quickfix",async()=>{
   const awaitMessage=predicate=>new Promise((resolve,reject)=>{const start=Date.now();const timer=setInterval(()=>{const m=messages.find(predicate);if(m){clearInterval(timer);resolve(m);}else if(Date.now()-start>5000){clearInterval(timer);reject(new Error("LSP response timeout"));}},10);});
   try{
     send({id:1,method:"initialize",params:{}});assert.equal((await awaitMessage(m=>m.id===1)).result.capabilities.hoverProvider,true);
-    const uri="file:///tmp/test.qsl",text="&A[qps=Q16]{u32 id;u8? a;u16? b;u32? c;}";
+    const uri="file:///tmp/test.qsl",text="&A[state_bits=Q16]{u32 id;u8? a;u16? b;u32? c;}";
     send({method:"textDocument/didOpen",params:{textDocument:{uri,text}}});await awaitMessage(m=>m.method==="textDocument/publishDiagnostics");
     send({id:2,method:"textDocument/hover",params:{textDocument:{uri},position:{line:0,character:2}}});assert.match((await awaitMessage(m=>m.id===2)).result.contents.value,/Q16/);
     send({method:"textDocument/didChange",params:{textDocument:{uri},contentChanges:[{text:"&A{u8? a;u64 required;}"}]}});
     send({id:3,method:"textDocument/codeAction",params:{textDocument:{uri},range:{start:{line:0,character:0},end:{line:0,character:24}},context:{diagnostics:[]}}});
     const actions=(await awaitMessage(m=>m.id===3)).result;assert.equal(actions.length,1);assert.match(actions[0].title,/wire format changes/);
   }finally{child.kill();}
+});
+
+test("QPS is operand compression and does not require optional fields",()=>{
+ for(const q of [2,4,8,16]){const r=analyze(`&P[qps=Q${q},safety]{u64(0..15) a;u64(0..15) b;}`);assert.equal(r.diags.filter(d=>d.sev===1).length,0,JSON.stringify(r.diags));assert(r.plans[0].qps);assert(r.plans[0].payloadQuantActive);assert.equal(r.plans[0].stateBits,false);assert.equal(r.plans[0].maximum,1);}
+ const p=analyze("&P[qps]{u64(0..15) a;}").plans[0];assert.equal(p.quantum,16);
+ assert(analyze("&P[qps=Q2,quant=Q4]{u64 a;}").diags.some(d=>d.sev===1));
+ assert(analyze("&P[qps=Q1]{u64 a;}").diags.some(d=>d.sev===1));
+});
+test("native QPS expands the screenshot's Rust template before optional analysis",{skip:!fs.existsSync(native)},()=>{
+ const old=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
+ try{const {pathToFileURL}=require("node:url"),u=pathToFileURL(path.resolve(__dirname,"editor-fixture/qps-macro.qsl")).href,rs=u.replace("qps-macro.qsl","models.rs");
+ const r=editorAnalysis("&MacroPredict[qps=Q16,safety]{u32 id;OptionalNumbers extras;}",u,{kind:"qsl",openDocs:new Map([[rs,"#[qsl::qsl_macro]pub struct OptionalNumbers{a:Option<u8>,b:Option<u16>,c:Option<u32>}"]])});
+ assert.equal(r.diags.filter(d=>d.sev===1).length,0,JSON.stringify(r.diags));assert.equal(r.plans[0].fieldCount,4);assert(r.plans[0].qps);assert.equal(r.plans[0].qpsCodecRevision,2);assert(!r.plans[0].stateBits);assert.equal(r.plans[0].payloadQuantActive,false);assert.equal(r.plans[0].dBits,0);
+ const exact=editorAnalysis("&P[qps,safety]{u64(0..15) a;u64(0..15) b;}",u,{kind:"qsl"});assert.equal(exact.plans[0].quantum,16);assert.equal(exact.plans[0].maximum,1);assert.equal(exact.plans[0].wireLayout.headerMaxBits,0);
+ }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });

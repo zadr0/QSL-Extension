@@ -2,7 +2,7 @@
 
 [Interactive editor guide (EN)](docs/EDITOR_EN.md) · [Интерактивный анализатор (RU)](docs/EDITOR_RU.md)
 
-Version 0.4 adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
+Version 0.5 separates QPS operand compression from opt_table prediction and adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
 
 Tree-sitter grammar is at the repository root; the complete Zed extension is in `zed-qsl/`.
 
@@ -28,15 +28,19 @@ Supported source types include fixed integers, `Option<T>`, `String`, `&str`, `&
 
 Mechanisms and attributes are opt-in. Field order is mandatory for every schema: required fields first, optional fields last. The language server underlines violations and offers a quickfix. Moving a field changes the wire format; it is never applied automatically.
 
-Checked decoding is generated only for `[safety]`. It is invoked through `validate`, `deserialize_checked`, or `deserialize_checked_into`; ordinary trusted methods do not acquire validation overhead. `inline` is also explicit; the compiler chooses inlining without that attribute. QPS is disabled by default, Q-table compression is explicitly selected, and `QSL_RT` defaults to false.
+Checked decoding is generated only for `[safety]`. It is invoked through `validate`, `deserialize_checked`, or `deserialize_checked_into`; ordinary trusted methods do not acquire validation overhead. `inline` is also explicit; the compiler chooses inlining without that attribute. QPS is disabled by default; `[qps]` selects Q16, and `QSL_RT` defaults to false.
 
-Hover over a schema to inspect its wire-size limit, static buffer eligibility, 32-bit D budget, index-table size before/after quantization, string encoding, and inline policy. Q2–Q16 compress table indices exactly; they do not round values or lengths. Ambiguous layouts require D or the legacy codec. Explicit unsupported quantization is an error.
+Hover over a schema to inspect wire-size limits, RT eligibility, numeric operand widths, optional-state metadata, strings and inline policy. Macro references show all expanded members rather than a misleading first-child size. QPS does not require optional fields. Native analysis requires `qpsCodecRevision: 2`; an older binary leaves explicitly labelled advisory estimates.
 
 `[opt_table]` / `[opt_table=static]` analyzes payload length `L` and emits a numeric event index: for two optional bytes, `I = (L > 0) + (L > 1)`. Every critical boundary is derived from schema ranges. The index selects an event function in a module-level static `EVENT_TABLE`. Deterministic handlers never read a tag; ambiguous handlers read only the remaining field-state information. Adjacent equivalent intervals are merged. Larger selectors use a statically unrolled numeric hierarchy rather than one table entry for every payload byte.
 
 Metadata has a known separate span and is excluded from `L`. Bounded raw strings use native length words in that span, without bit extraction; the last variable field derives its length from the payload remainder. Skipping a tag **read** does not remove its reserved wire byte. `[opt_table,predict_seq]` keeps the same format but generates direct mask expressions instead of the indirect event call; Rust inlining is independently controlled by `inline`. Generic analysis is bounded to 12 fields / 65535 payload bytes; equal fixed widths are handled directly up to 64 fields. Unsupported layouts keep the explicit fallback codec. `[opt_table=legacy]` retains the previous per-message offset directory. Updating modes or metadata layout requires matching schemas on both peers.
 
-`[quant=Q16]` is independent of Q_table: it packs bounded integer ranks, retaining the exact quotient **and** remainder. For example, eight `u64(0..15)` fields occupy 4 payload bytes rather than 64. Hover shows the raw/packed upper bounds, private initialized padding and raw fallback reason. Unsupported fields or no physical buffer saving keep the original codec. Restoration uses a separate larger native destination; prepared/RT buffers are reusable. Padding is never transmitted. `predict_seq` byte-length inference and Q_table lookup cannot be applied to this packed representation; use static bit-prefix `opt_table` or plain `qps` (a 32-bit D) alongside `quant`. Prepared pointer decoding requires its explicitly declared initialized tail; exact-slice checked decoding does not.
+`[qps]` defaults to Q16; explicit `[qps=Q2]`, Q4, Q8 and Q16 are supported. `[quant=Qn]` is a compatible alias; specifying both is rejected. QPS packs bounded integer ranks using a numeric divisor and preserves both quotient and remainder. It is compression, not presence prediction. For a rank `r = x - min` of width B, `k = min(log2(Q), B)`, `u = r >> k`, `v = r & ((1 << k) - 1)`, and `code = u | (v << (B-k))`. The inverse restores r exactly. Constant domains use no value bits. Q can change encoded bytes without changing total length; savings come from the bounded domain and packing.
+
+For example, eight `u64(0..15)` values use 4 payload bytes instead of 64. Optional fields remain optional; `opt_table` independently selects their length/offset graph and uses bit-prefix handling for a packed layout. Unsupported fields or no physical buffer saving keep an explicitly reported raw fallback. Restoration writes into a separate larger native destination. Prepared/RT buffers can be reused; initialized private tail bytes are never transmitted. Checked exact-slice decoding does not require the prepared pointer API's extra tail.
+
+The old D/u32 and quantized-index representation is available only through explicit `[state_bits]` / `[state_bits=Q1|Q2|Q4|Q8|Q16]` for compatibility. It is not new QPS. Changing codec or quantum changes format identity; both peers must use the same schema and configuration.
 
 The dependency-free Node server provides a preliminary plan. For the exact parser and build plan, build `qsl-analyze` from the matching QSL checkout:
 

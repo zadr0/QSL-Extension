@@ -56,3 +56,9 @@ test("LSP partial edits and constant definition navigation use UTF-16 positions"
   c.send({method:"textDocument/didChange",params:{textDocument:{uri,version:2},contentChanges:[{range:{start:{line:1,character:8},end:{line:1,character:11}},text:"u8"}]}});const errors=(await c.wait(m=>m.method==="textDocument/publishDiagnostics"&&m.params.uri===uri&&m.params.version===2)).params.diagnostics;assert.equal(errors.filter(d=>d.severity===1).length,0);
  }finally{c.close();}
 });
+
+test("macro field hover includes every expanded field instead of only its first child",{skip:!fs.existsSync(native)},()=>{
+ const rust="#[qsl::qsl_macro]struct OptionalNumbers{a:Option<u8>,b:Option<u16>,c:Option<u32>}",text="&MacroPredict[qps=Q16,safety]{u32 id;OptionalNumbers extras;}",rs=uri.replace("packet.qsl","models.rs");
+ const report=editorAnalysis(text,uri,{analyzerPath:native,openDocs:new Map([[rs,rust]])});const st=report.structs[0],plan=report.plans[0];const hover=ui.fieldHover(st,plan,"extras","en");for(const name of ["extras_a","extras_b","extras_c"])assert(hover.includes(name));
+ const hints=ui.hints(report,text,"en",{},o=>({line:0,character:o}));assert(hints.some(h=>h.label.includes("3 expanded fields")));
+});
