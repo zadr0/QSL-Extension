@@ -8,7 +8,7 @@ repository = "https://github.com/zadr0/QSL-Extension"
 
 [grammars.qsl]
 repository = "https://github.com/zadr0/QSL-Extension"
-rev = "c7e8b73eadf297c39557eb92af2e4511b8961a73"
+rev = "aac9d7b00279e7e2ab10dc6098c83b8474b5b432"
 
 [language_servers.qsl-lsp]
 name = "QSL Language Server"
