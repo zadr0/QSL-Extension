@@ -1,6 +1,29 @@
 "use strict";
 // Advisory fallback shares the bounded DIRECT_BITS/unit-transition model with
 // QSL. When qsl-analyze is available its parser/build plan is authoritative.
+function payloadPlan(fields,attrs,rawMaximum) {
+  const result={payloadQuantRequested:Object.hasOwn(attrs,"quant"),payloadQuantActive:false,payloadQuantum:Number((attrs.quant||"Q2").replace("Q","")),payloadPadding:0,rawMaximum,payloadReason:"payload quantization disabled"};
+  if(!result.payloadQuantRequested)return result;
+  if(![2,4,8,16].includes(result.payloadQuantum)){result.payloadReason="quant expects Q2, Q4, Q8 or Q16";return result;}
+  let bits=0,required=0,residues=new Set([0]),padding=1;
+  const literal=t=>{try{return t?.t==="number"&&!t.x.includes(".")?BigInt(t.x.replaceAll("_","")):null;}catch{return null;}};
+  for(const f of fields){
+    const n=f.type.name.x,match=/^([ui])(8|16|32|64)$/.exec(n);
+    if(!match){result.payloadReason="non-numeric or unresolved payload: raw fallback; use the native analyzer for the exact plan";return result;}
+    const width=BigInt(match[2]);let lo=match[1]==="i"?-(1n<<(width-1n)):0n,hi=match[1]==="i"?(1n<<(width-1n))-1n:(1n<<width)-1n;
+    if(f.type.size){lo=literal(f.type.size.lo);hi=literal(f.type.size.hi);if(lo===null||hi===null||hi<lo){result.payloadReason="bounds need native evaluation; raw advisory fallback";return result;}}
+    const span=hi-lo,b=span===0n?0:span.toString(2).length;
+    const start=Math.max(...residues),word=[1,2,4,8,16].find(w=>w<=result.payloadQuantum&&w*8>=b+start)||result.payloadQuantum;
+    padding=Math.max(padding,word);bits+=b;if(!f.type.optional)required+=b;
+    const next=new Set([...residues].map(r=>(r+b)&7));residues=f.type.optional?new Set([...residues,...next]):next;
+  }
+  const header=Object.hasOwn(attrs,"qps")?4:Math.ceil(fields.filter(f=>f.type.optional).length/8);
+  result.payloadMaximum=header+Math.ceil(bits/8);result.payloadMinimum=header+Math.ceil(required/8);
+  result.payloadQuantActive=rawMaximum!==null&&result.payloadMaximum+padding<rawMaximum;
+  result.payloadPadding=result.payloadQuantActive?padding:0;
+  result.payloadReason=result.payloadQuantActive?"exact quotient and remainder; separate native restoration":"no physical buffer saving including padding; raw fallback";
+  return result;
+}
 function analyzeLayout(structs, configs = {}) {
   const plans = [], diags = [];
   const definitions=new Map(structs.map(s=>[s.name.x,s]));
@@ -31,11 +54,16 @@ function analyzeLayout(structs, configs = {}) {
     const quantum = qps ? Number((attrs.qps || "Q1").replace("Q", "")) : 1;
     const error = (token, m) => diags.push({s:token.s,e:token.e,m,sev:1});
     for (const [k,v] of Object.entries(attrs)) {
-      if (!["macro","qps","predict_seq","opt_table","inline","compact","alignment","lifetime","safety","optionals"].includes(k)) error(s.name,`Unknown schema attribute '${k}'`);
+      if (!["macro","qps","quant","predict_seq","opt_table","inline","compact","alignment","lifetime","safety","optionals"].includes(k)) error(s.name,`Unknown schema attribute '${k}'`);
       if (k === "qps" && ![1,2,4,8,16].includes(quantum)) error(s.name,"QPS quantum must be Q1, Q2, Q4, Q8 or Q16");
       if (k === "inline" && v && !["hint","always","never"].includes(v)) error(s.name,"inline expects hint, always or never");
+      if(k==="quant"&&!["Q2","Q4","Q8","Q16"].includes(v))error(s.name,"quant expects Q2, Q4, Q8 or Q16");
+      if(k==="opt_table"&&v&&!["static","legacy"].includes(v))error(s.name,"opt_table expects static or legacy");
     }
     const predictive = qps || Object.hasOwn(attrs,"predict_seq");
+    const staticOptional=Object.hasOwn(attrs,"opt_table")&&attrs.opt_table!=="legacy";
+    if(attrs.opt_table==="legacy"&&(qps||Object.hasOwn(attrs,"predict_seq")))error(s.name,"Legacy wire offsets conflict with predictive layouts");
+    if(Object.hasOwn(attrs,"quant")&&(Object.hasOwn(attrs,"compact")||Object.hasOwn(attrs,"alignment")||attrs.optionals==="bitmap"||attrs.opt_table==="legacy"))error(s.name,"quant conflicts with compact, alignment, bitmap and legacy offsets");
     const strictTail=true;
     if ((predictive || Object.hasOwn(attrs,"opt_table")) && (attrs.compact !== undefined || attrs.optionals === "bitmap")) error(s.name,"Predictive/opt_table layout cannot be combined with compact or bitmap");
     if (predictive && !optional.length) error(s.name,"Predictive layout requires an optional tail");
@@ -69,7 +97,7 @@ function analyzeLayout(structs, configs = {}) {
     }
     if (qps && bits>32) error(s.name,`DIRECT_BITS requires ${bits} bits; D has 32. Disable QPS or split the schema.`);
     let reason = "legacy codec", indexBytes = 0, plainIndexBytes = 0;
-    if (predictive) {
+    if (predictive||staticOptional) {
       reason = "direct D extraction";
       if (widths.every(n=>n!==null) && widths.length <=12 && widths.reduce((a,b)=>a+b,0)<=65535) {
         const sums = new Set();let collision=false;
@@ -77,15 +105,21 @@ function analyzeLayout(structs, configs = {}) {
         if(!collision){const size=widths.reduce((a,b)=>a+b,0)+1;plainIndexBytes=size*4;indexBytes=Math.ceil(size/quantum)*4;reason="exact static subset-sum lookup";}
         else reason="ambiguous subset sums: direct D is required";
       } else reason="variable lengths or table analysis budget: direct D extraction";
-      if(!qps && optional.length>1 && !plainIndexBytes)error(s.name,"Non-quantized predict_seq needs unique fixed-size subset sums within the table budget; use qps or opt_table");
+      if(!qps && predictive && optional.length>1 && !plainIndexBytes)error(s.name,"Non-quantized predict_seq needs unique fixed-size subset sums within the table budget; use qps or opt_table");
       if(quantum>1 && !plainIndexBytes)error(s.name,"Selected Q_table cannot reconstruct this layout from length; use unquantized qps (D) or opt_table");
     }
     if(maximum!==null){
       if(qps)maximum+=4;
-      else if(Object.hasOwn(attrs,"opt_table")&&optional.length>1)maximum+=1+4*optional.length;
+      else if(staticOptional)maximum+=plainIndexBytes||optional.length===0||optional.length===1&&widths[0]!==0?0:Math.ceil(optional.length/8);
+      else if(attrs.opt_table==="legacy"&&optional.length>1)maximum+=1+4*optional.length;
+      else if(attrs.opt_table==="legacy"&&optional.length===1){}
       else if(!Object.hasOwn(attrs,"predict_seq")&&optional.length)maximum+=Math.ceil((optional.length===1?1:Math.ceil(Math.log2(optional.length+1))+optional.length*Math.ceil(Math.log2(Math.max(1,fields.length))))/8);
     }
-    plans.push({name:s.name.x,maximum,rtEligible:maximum!==null,rtEnabled:configs.QSL_RT==="true"&&maximum!==null,slots:Number(configs.QSL_RT_DEFAULT||16),qps,quantum,dBits:bits,indexBytes,plainIndexBytes,reason,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,structureMacro:Object.hasOwn(attrs,"macro"),optionalTailRequired:strictTail,safety:Object.hasOwn(attrs,"safety"),suggestFixedPrefix,approximate:true});
+    const payload=payloadPlan(fields,attrs,maximum);
+    if(payload.payloadQuantActive){maximum=payload.payloadMaximum;if(Object.hasOwn(attrs,"predict_seq"))error(s.name,"quant cannot infer field presence from compressed byte length; use opt_table or qps");if(qps&&quantum!==1)error(s.name,"Payload bit-prefix graphs use direct D, not Q_table length lookup; combine quant with plain qps");}
+    const slots=Number(configs.QSL_RT_DEFAULT||16),eligible=maximum!==null&&(maximum+payload.payloadPadding)*slots<=64*1024*1024;
+    const mode=payload.payloadQuantActive&&staticOptional?"packed bit-prefix Boolean graph":staticOptional?(plainIndexBytes?"static critical lengths; no wire directory":"static prefix graph with presence bits or EOF predicate; no wire directory"):attrs.opt_table==="legacy"?"legacy wire offset directory":"disabled";
+    plans.push({name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,structureMacro:Object.hasOwn(attrs,"macro"),optionalTailRequired:strictTail,safety:Object.hasOwn(attrs,"safety"),suggestFixedPrefix,approximate:true});
   }
   return {plans,diags};
 }
@@ -97,6 +131,8 @@ function describe(p) {
     p.qps ? `QPS: D занимает 4 B, использовано ${p.dBits}/32 бит. Данные и длины точные.` : "QPS выключен: сохраняется выбранный неквантованный формат.",
     p.plainIndexBytes ? `Таблица индексов Q${p.quantum}: ${p.indexBytes} B вместо ${p.plainIndexBytes} B. Это сжатие таблицы, без потери payload. Скорость определяется измерением.` : `Стратегия: ${p.reason}.`,
     `Inline: ${p.inline}.`,
+    ...(p.staticOptional&&p.staticOptional!=="disabled"?[`opt_table: ${p.staticOptional}.`]:[]),
+    ...(p.payloadQuantRequested?[p.payloadQuantActive?`Payload quant=Q${p.payloadQuantum}: максимум ${p.payloadMaximum} B вместо ${p.rawMaximum} B; отдельно ${p.payloadPadding} B инициализированного хвоста (не передаётся). Частное и остаток сохранены полностью. Восстановление идёт в отдельный нативный буфер; подготовленные области используются повторно.`:`Payload: raw fallback. ${p.payloadReason}.`]:[]),
     ...(p.structureMacro?[`Структура-макрос: отдельный Rust-тип сохранён; при вставке разворачиваются ${p.fieldCount} полей. Вложенные вставки разворачиваются рекурсивно.`]:[]),
     `Проверка входных данных: ${p.safety?"доступна через checked API ([safety])":"выключена; включается атрибутом [safety]"}. Порядок optional-хвоста: ${p.optionalTailRequired?"обязателен для всех схем":"свободный, прежний формат"}.`,
     ...(p.strings||[]),

@@ -2,5 +2,5 @@
   "grammars": [
     { "name": "qsl", "camelcase": "Qsl", "scope": "source.qsl", "path": ".", "file-types": ["qsl","deq"] }
   ],
-  "metadata": { "version": "0.0.1", "license": "MIT", "description": "Tree-sitter grammar for QSL" }
+  "metadata": { "version": "0.2.0", "license": "MIT", "description": "Tree-sitter grammar for QSL" }
 }

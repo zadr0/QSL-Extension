@@ -40,7 +40,7 @@ QPS and inline attributes, exact UTF-8 range
     (struct_attributes
       (attribute
         (identifier)
-        (identifier))
+        (quantum))
       (attribute
         (identifier))
       (attribute
@@ -176,4 +176,41 @@ Nested structure macros retain standalone declarations
         (type
           (identifier)
           (optional_marker))
+        (identifier)))))
+
+==================
+Independent exact payload and static optional graph attributes
+==================
+&Exact[quant=Q16,opt_table=static,safety] {u64(0..15) value;u64?(0..7) extra;}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier)
+        (quantum))
+      (attribute
+        (identifier)
+        (identifier))
+      (attribute
+        (identifier)))
+    (struct_body
+      (field
+        (type
+          (identifier)
+          (size
+            (range
+              (number)
+              (number))))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (optional_marker)
+          (size
+            (range
+              (number)
+              (number))))
         (identifier)))))

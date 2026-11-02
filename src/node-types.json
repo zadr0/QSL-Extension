@@ -32,6 +32,10 @@
           "named": true
         },
         {
+          "type": "quantum",
+          "named": true
+        },
+        {
           "type": "sizeof_expression",
           "named": true
         },
@@ -85,6 +89,10 @@
             "named": true
           },
           {
+            "type": "quantum",
+            "named": true
+          },
+          {
             "type": "sizeof_expression",
             "named": true
           },
@@ -126,6 +134,10 @@
         },
         {
           "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "quantum",
           "named": true
         },
         {
@@ -179,6 +191,10 @@
           },
           {
             "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "quantum",
             "named": true
           },
           {
@@ -250,6 +266,10 @@
             "named": true
           },
           {
+            "type": "quantum",
+            "named": true
+          },
+          {
             "type": "sizeof_expression",
             "named": true
           },
@@ -301,6 +321,10 @@
           },
           {
             "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "quantum",
             "named": true
           },
           {
@@ -394,6 +418,10 @@
             "named": true
           },
           {
+            "type": "quantum",
+            "named": true
+          },
+          {
             "type": "sizeof_expression",
             "named": true
           },
@@ -453,6 +481,10 @@
           "named": true
         },
         {
+          "type": "quantum",
+          "named": true
+        },
+        {
           "type": "sizeof_expression",
           "named": true
         },
@@ -496,6 +528,10 @@
             "named": true
           },
           {
+            "type": "quantum",
+            "named": true
+          },
+          {
             "type": "sizeof_expression",
             "named": true
           },
@@ -531,6 +567,10 @@
           },
           {
             "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "quantum",
             "named": true
           },
           {
@@ -575,6 +615,10 @@
         },
         {
           "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "quantum",
           "named": true
         },
         {
@@ -783,6 +827,10 @@
           "named": true
         },
         {
+          "type": "quantum",
+          "named": true
+        },
+        {
           "type": "sizeof_expression",
           "named": true
         },
@@ -896,6 +944,10 @@
   },
   {
     "type": "optional_marker",
+    "named": true
+  },
+  {
+    "type": "quantum",
     "named": true
   },
   {

@@ -101,7 +101,9 @@ module.exports = grammar({
       ),
 
     _value: ($) => $._expression,
-    _expression: ($) => choice($.constant,$.number,$.string,$.identifier,$.binary_expression,$.unary_expression,$.sizeof_expression,$.parenthesized_expression),
+    _expression: ($) => choice($.constant,$.number,$.string,$.quantum,$.identifier,$.binary_expression,$.unary_expression,$.sizeof_expression,$.parenthesized_expression),
+    // A named operand, not a precision or an implicit payload mode.
+    quantum: (_) => token(prec(1,/Q(16|8|4|2|1)/)),
     binary_expression: ($) => choice(
       prec.left(1,seq($._expression,choice("+","-"),$._expression)),
       prec.left(2,seq($._expression,choice("*","/","%"),$._expression))),

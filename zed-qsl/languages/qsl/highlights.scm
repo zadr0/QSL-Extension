@@ -33,6 +33,7 @@
 (number) @number
 (string) @string
 (constant) @constant
+(quantum) @constant
 
 ((identifier) @boolean
   (#match? @boolean "^(true|false)$"))

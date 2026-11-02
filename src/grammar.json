@@ -629,6 +629,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "quantum"
+        },
+        {
+          "type": "SYMBOL",
           "name": "identifier"
         },
         {
@@ -648,6 +652,17 @@
           "name": "parenthesized_expression"
         }
       ]
+    },
+    "quantum": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "Q(16|8|4|2|1)"
+        }
+      }
     },
     "binary_expression": {
       "type": "CHOICE",

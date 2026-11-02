@@ -2,7 +2,7 @@
 
 Tree-sitter grammar is at the repository root; the complete Zed extension is in `zed-qsl/`.
 
-Supported additions: `qps`, `qps=Q2|Q4|Q8|Q16`, unquantized `predict_seq`, `opt_table`, schema-controlled `inline`, `inline=hint|always|never`, and DEQ generation configuration:
+Supported additions: `qps`, `qps=Q2|Q4|Q8|Q16`, exact numeric payload `quant=Q2|Q4|Q8|Q16`, unquantized `predict_seq`, static `opt_table`, schema-controlled `inline`, `inline=hint|always|never`, and DEQ generation configuration:
 
 ```text
 !config QSL_RT = true;
@@ -16,6 +16,10 @@ Mechanisms and attributes are opt-in. Field order is mandatory for every schema:
 Checked decoding is generated only for `[safety]`. It is invoked through `validate`, `deserialize_checked`, or `deserialize_checked_into`; ordinary trusted methods do not acquire validation overhead. `inline` is also explicit; the compiler chooses inlining without that attribute. QPS is disabled by default, Q-table compression is explicitly selected, and `QSL_RT` defaults to false.
 
 Hover over a schema to inspect its wire-size limit, static buffer eligibility, 32-bit D budget, index-table size before/after quantization, string encoding, and inline policy. Q2–Q16 compress table indices exactly; they do not round values or lengths. Ambiguous layouts require D or the legacy codec. Explicit unsupported quantization is an error.
+
+`[opt_table]` / `[opt_table=static]` now uses module-level critical-length and prefix graphs, with generated Boolean presence functions. Unique fixed lengths require no wire directory. Ambiguous lengths and zero-byte present values use presence bits. The previous per-message offset directory is selected explicitly with `[opt_table=legacy]`; changing modes changes format identity and requires updating both peers.
+
+`[quant=Q16]` is independent of Q_table: it packs bounded integer ranks, retaining the exact quotient **and** remainder. For example, eight `u64(0..15)` fields occupy 4 payload bytes rather than 64. Hover shows the raw/packed upper bounds, private initialized padding and raw fallback reason. Unsupported fields or no physical buffer saving keep the original codec. Restoration uses a separate larger native destination; prepared/RT buffers are reusable. Padding is never transmitted. `predict_seq` byte-length inference and Q_table lookup cannot be applied to this packed representation; use static bit-prefix `opt_table` or plain `qps` (a 32-bit D) alongside `quant`. Prepared pointer decoding requires its explicitly declared initialized tail; exact-slice checked decoding does not.
 
 The dependency-free Node server provides a preliminary plan. For the exact parser and build plan, build `qsl-analyze` from the matching QSL checkout:
 

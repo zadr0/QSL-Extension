@@ -31,6 +31,30 @@ test("recursive macro expansion preserves standalone types and field constraints
   let empty="&M0[macro]{}";for(let i=1;i<32;i++)empty+=`&M${i}[macro]{M${i-1} a;M${i-1} b;}`;assert.equal(analyze(empty).diags.filter(d=>d.sev===1).length,0);
 });
 const native=path.resolve(__dirname,"../../../qsl/target/release/qsl-analyze.exe");
+test("static opt_table has no wire directory, with explicit legacy compatibility",()=>{
+  const source="{u32 id;u8? a;u16? b;u32? c;}";
+  const a=analyze("&A[opt_table]"+source);assert.equal(a.plans[0].maximum,11);assert.match(describe(a.plans[0]),/critical lengths/);
+  assert.equal(analyze("&A[opt_table=legacy]"+source).plans[0].maximum,24);
+  assert.equal(analyze("&A[opt_table]{u32 id;u8? a;u8? b;}").plans[0].maximum,7);
+  assert.equal(analyze("&A[opt_table]{u32 id;str?(0) empty;}").plans[0].maximum,5);
+});
+test("exact numerical payload plans retain both operands and show raw fallback",()=>{
+  const fields="{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64(0..15) d;}";
+  for(const q of [2,4,8,16]){
+    const a=analyze(`&A[quant=Q${q},safety]`+fields);assert.equal(a.diags.filter(d=>d.sev===1).length,0,JSON.stringify(a.diags));
+    assert.equal(a.plans[0].payloadQuantActive,true);assert.equal(a.plans[0].maximum,2);assert.equal(a.plans[0].payloadPadding,1);assert.match(describe(a.plans[0]),/остаток сохранены/);
+  }
+  assert.equal(analyze("&A[quant=Q16]{u64 a;}").plans[0].payloadQuantActive,false);
+  assert(analyze("&A[quant=Q3]{u64 a;}").diags.some(d=>d.sev===1));
+});
+test("native payload and static graph plans match the generator",{skip:!fs.existsSync(native)},()=>{
+  const old=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
+  try{
+    const result=editorAnalysis("&A[quant=Q16,opt_table,safety]{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64?(0..15) d;}","file:///tmp/quant.qsl",{kind:"qsl"});
+    assert.equal(result.diags.filter(d=>d.sev===1).length,0,JSON.stringify(result.diags));const p=result.plans[0];
+    assert.equal(p.payloadQuantActive,true);assert.equal(p.maximum,3);assert.equal(p.payloadPadding,1);assert.match(p.staticOptional,/Boolean graph/);
+  }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
+});
 test("native generator plans agree with advisory quantum analysis",{skip:!fs.existsSync(native)},()=>{
   const previous=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
   try {for(const q of [1,2,4,8,16]){
