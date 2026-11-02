@@ -2,7 +2,7 @@
 
 [Interactive editor guide (EN)](docs/EDITOR_EN.md) · [Интерактивный анализатор (RU)](docs/EDITOR_RU.md)
 
-Version 0.5 separates QPS operand compression from opt_table prediction and adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
+Version 0.6 adds general byte-operand QPS APIs and single-u8 warnings, and separates QPS operand compression from opt_table prediction and adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
 
 Tree-sitter grammar is at the repository root; the complete Zed extension is in `zed-qsl/`.
 
@@ -62,3 +62,9 @@ cargo build --manifest-path zed-qsl/Cargo.toml --target wasm32-wasip2 --release 
 ```
 
 The native-plan tests run when the adjacent QSL analyzer exists, and are explicitly skipped in a standalone grammar checkout. The stdio LSP test checks diagnostics, hover, and quickfix responses. To use the local extension, choose **Install Dev Extension** in Zed and select `zed-qsl/`. Generated grammar files remain checked in for GitHub consumers.
+
+## General byte QPS (RU / EN)
+
+QPS does not predict presence. `opt_table` owns length prediction. In addition to scalar specialization, checked schemas can use `ByteQps<Q>` over their entire serialized bytes, including UTF-8 and arrays. `[qps,safety]` generates explicit `serialize_qps_to(scratch,out)` and owned `deserialize_qps_into(input,restoration,out)`; borrowed schemas use `deserialize_qps` and borrow the restored region. Existing `Serializable` bytes are not silently replaced. The 16 B QPB3 envelope stores original length without quantization. Raw fallback pays the explicit framing cost; grouping four unrestricted u8 values does not guarantee fewer than 32 bits. Hover distinguishes scalar specialization, general byte APIs and prediction. A single u8 without a scalar saving receives a warning, not a schema error. The native bridge requires byte codec revision 3.
+
+QPS не предиктует поля: длину анализирует `opt_table`. Помимо числовой специализации, `ByteQps<Q>` работает со всем сериализованным payload, включая UTF-8 и массивы. Для `[qps,safety]` доступны явные методы общего кодека с scratch/output/restoration. Заимствованный результат живёт в восстановленном регионе. Существующий `Serializable` не меняет формат неявно. Заголовок QPB3 занимает 16 B и хранит исходную длину без квантования. Для raw-режима цена заголовка показывается явно. Объединение четырёх произвольных u8 не гарантирует сжатия 32 бит. В hover разделены специализация, общие API и предиктование; одиночный u8 без выигрыша получает предупреждение.

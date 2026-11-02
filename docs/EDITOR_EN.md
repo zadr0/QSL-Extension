@@ -2,7 +2,7 @@
 
 [Русский](EDITOR_RU.md)
 
-QSL 0.5 uses standard editor features instead of a single prose tooltip.
+QSL 0.6 uses standard editor features instead of a single prose tooltip.
 
 | Where | What is shown |
 |---|---|
@@ -76,3 +76,5 @@ With the default Windows Zed keymap, `Ctrl+.` opens code actions.
 `[qps]` means exact operand compression with Q16 by default; explicit Q2/Q4/Q8/Q16 and the `quant=Qn` alias are supported. Required-only schemas are valid. `opt_table` independently predicts optional states from length; it is not part of QPS. The old D/index format is explicitly `state_bits`. Both endpoints must agree on codec and quantum. Matching native analysis requires codec revision 2; older analyzers leave labelled preliminary estimates.
 
 Rust macro references show a group inlay with the number of expanded fields. Their hover lists every flattened member, size and offset; it never assigns the first member's size to the whole group.
+
+General byte QPS has a separate 16 B envelope and explicit region APIs; its original length is unquantized. Hover labels scalar specialization separately. Byte bridge revision 3 is required; tiny u8 schemas receive a non-fatal no-saving warning.

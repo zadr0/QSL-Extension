@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-qsl",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Tree-sitter grammar for QSL",
   "license": "MIT",
   "main": "grammar.js",

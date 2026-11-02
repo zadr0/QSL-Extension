@@ -514,7 +514,7 @@ function editorAnalysis(text,uri,opts={}) {
     const modified=fs.statSync(command).mtimeMs;let cached=analyzerCapabilities.get(command);
     if(!cached||cached.modified!==modified){let capabilities={};try{const r=spawnSync(command,["--capabilities"],{input:"",encoding:"utf8",timeout:3000,windowsHide:true});capabilities=JSON.parse(r.stdout);}catch{}cached={modified,capabilities};analyzerCapabilities.set(command,cached);}
     report.nativeCapabilities=cached.capabilities;
-    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.qpsCodecRevision!==2){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
+    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.qpsCodecRevision!==2||cached.capabilities.qpsByteCodecRevision!==3){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
   }
   const deqs=[];
   const open=new Map();for(const [u,t] of opts.openDocs||[]){try{if(u.toLowerCase().endsWith(".deq"))open.set(path.resolve(fileURLToPath(u)).toLowerCase(),t);}catch{}}
@@ -538,6 +538,7 @@ function editorAnalysis(text,uri,opts={}) {
     else{const byte=native.offset||Number(/at byte (\d+)/.exec(native.message)?.[1])||0,at=Buffer.from(text).subarray(0,byte).toString("utf8").length;
       report.plans=[];report.diags.push({s:Math.min(Math.max(0,at-1),Math.max(0,text.length-1)),e:Math.min(Math.max(1,at),text.length),m:native.message,sev:1});}
   }catch(error){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer returned invalid JSON: ${error.message}`});}
+  for(const st of report.structs){const p=report.plans.find(p=>p.name===st.name.x);if(p?.qps&&!p.payloadQuantActive&&st.fields.size===1){const f=[...st.fields.values()][0];if(f.type.name.x==='u8'&&!report.diags.some(d=>d.s===f.name.s&&d.e===f.name.e&&d.m.startsWith('A single u8')))report.diags.push({s:f.name.s,e:f.name.e,sev:2,m:"A single u8 cannot benefit from grouping; exact QPS keeps raw data when framing costs more"});}}
   return report;
 }
 
@@ -647,7 +648,7 @@ function main() {
    clientLocale=params.locale||"";clientCaps=params.capabilities||{};configure(params.initializationOptions||{});
    const folders=(params.workspaceFolders||[]).map(f=>f.uri);if(!folders.length&&params.rootUri)folders.push(params.rootUri);
    if(folders.length){roots=[];for(const u of folders)try{roots.push(fileURLToPath(u));}catch{}}
-   return reply(m.id,{capabilities:{positionEncoding:"utf-16",textDocumentSync:{openClose:true,change:1,save:{includeText:false}},hoverProvider:true,codeActionProvider:true,inlayHintProvider:{resolveProvider:false},codeLensProvider:{resolveProvider:true},documentSymbolProvider:true,definitionProvider:true,completionProvider:{triggerCharacters:["[",",","=","|","!"],resolveProvider:false},foldingRangeProvider:true,executeCommandProvider:{commands:["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust","qsl.setLanguage"]},workspace:{workspaceFolders:{supported:true,changeNotifications:true}}},serverInfo:{name:"qsl-lsp",version:"0.5.0"}});
+   return reply(m.id,{capabilities:{positionEncoding:"utf-16",textDocumentSync:{openClose:true,change:1,save:{includeText:false}},hoverProvider:true,codeActionProvider:true,inlayHintProvider:{resolveProvider:false},codeLensProvider:{resolveProvider:true},documentSymbolProvider:true,definitionProvider:true,completionProvider:{triggerCharacters:["[",",","=","|","!"],resolveProvider:false},foldingRangeProvider:true,executeCommandProvider:{commands:["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust","qsl.setLanguage"]},workspace:{workspaceFolders:{supported:true,changeNotifications:true}}},serverInfo:{name:"qsl-lsp",version:"0.6.0"}});
   }
   if(m.method==="initialized"){
    if(clientCaps.workspace?.didChangeWatchedFiles?.dynamicRegistration)request("client/registerCapability",{registrations:[{id:"qsl-inputs",method:"workspace/didChangeWatchedFiles",registerOptions:{watchers:[{globPattern:"**/*.deq"},{globPattern:"**/*.rs"},{globPattern:"**/*.qsl"}]}}]}).catch(e=>process.stderr.write(`[qsl-lsp] ${e.message}\n`));return;

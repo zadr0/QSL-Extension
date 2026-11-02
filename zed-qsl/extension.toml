@@ -1,6 +1,6 @@
 id = "qsl"
 name = "QSL"
-version = "0.5.0"
+version = "0.6.0"
 schema_version = 1
 authors = ["ArsaQ <twink.senya13@gmail.com>"]
 description = "Syntax highlighting and error diagnostics for the QSL schema language."

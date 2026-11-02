@@ -62,3 +62,6 @@ test("macro field hover includes every expanded field instead of only its first 
  const report=editorAnalysis(text,uri,{analyzerPath:native,openDocs:new Map([[rs,rust]])});const st=report.structs[0],plan=report.plans[0];const hover=ui.fieldHover(st,plan,"extras","en");for(const name of ["extras_a","extras_b","extras_c"])assert(hover.includes(name));
  const hints=ui.hints(report,text,"en",{},o=>({line:0,character:o}));assert(hints.some(h=>h.label.includes("3 expanded fields")));
 });
+test("whole-payload QPS is separate from scalar layout and emits a single-u8 warning",{skip:!fs.existsSync(native)},()=>{
+ const r=editorAnalysis("&Single[qps,safety]{u8 value;}",uri,{analyzerPath:native});assert.equal(r.plans[0].qpsByteCodecRevision,3);assert.equal(r.plans[0].qpsByteHeader,16);assert.equal(r.plans[0].qpsByteMaximum,17);assert.equal(r.plans[0].qpsByteAPI,true);assert.equal(r.plans[0].payloadQuantActive,false);const warnings=r.diags.filter(d=>d.sev===2&&d.m.startsWith("A single u8"));assert.equal(warnings.length,1);assert.match(i18n.diagnostic(warnings[0].m,"ru"),/Одиночный u8/);assert(!r.diags.some(d=>d.sev===1));
+});
