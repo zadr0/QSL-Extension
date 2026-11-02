@@ -126,11 +126,9 @@ Nonquantized table and expression bounds
             (identifier)))))))
 
 ==================
-Nested structure macros retain standalone declarations
+References to Rust templates keep schema attributes separate
 ==================
-&Clock[macro] {u64 ticks;}
-&Trace[macro] {Clock stamp;u16 kind;}
-&Packet[safety] {Trace trace;u32 id;u16? extra;}
+&Packet[opt_table,predict_seq,safety] {Trace trace;u32 id;u16? extra;}
 ---
 
 (source_file
@@ -138,29 +136,9 @@ Nested structure macros retain standalone declarations
     (identifier)
     (struct_attributes
       (attribute
-        (identifier)))
-    (struct_body
-      (field
-        (type
-          (identifier))
-        (identifier))))
-  (struct_declaration
-    (identifier)
-    (struct_attributes
-      (attribute
-        (identifier)))
-    (struct_body
-      (field
-        (type
-          (identifier))
         (identifier))
-      (field
-        (type
-          (identifier))
-        (identifier))))
-  (struct_declaration
-    (identifier)
-    (struct_attributes
+      (attribute
+        (identifier))
       (attribute
         (identifier)))
     (struct_body

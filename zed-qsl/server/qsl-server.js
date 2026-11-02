@@ -502,26 +502,34 @@ function analyze(text, opts = {}) {
 
 function offsetPosition(text,offset){const prior=text.slice(0,offset),last=prior.lastIndexOf("\n");return {line:(prior.match(/\n/g)||[]).length,character:offset-last-1};}
 function positionOffset(text,p){const lines=text.split("\n");let offset=0;for(let i=0;i<Math.min(p.line,lines.length);i++)offset+=lines[i].length+1;return offset+p.character;}
+const analyzerCapabilities=new Map();
 function editorAnalysis(text,uri,opts={}) {
   const report=analyze(text,opts);
   const executables=[process.env.QSL_ANALYZER,...roots.flatMap(r=>[path.join(r,"qsl","target","release","qsl-analyze.exe"),path.join(r,"qsl","target","release","qsl-analyze")])].filter(Boolean);
   const command=executables.find(f=>fs.existsSync(f));if(!command)return report;
+  if(opts.kind!=="deq"){
+    const modified=fs.statSync(command).mtimeMs;let cached=analyzerCapabilities.get(command);
+    if(!cached||cached.modified!==modified){let capabilities={};try{const r=spawnSync(command,["--capabilities"],{input:"",encoding:"utf8",timeout:3000,windowsHide:true});capabilities=JSON.parse(r.stdout);}catch{}cached={modified,capabilities};analyzerCapabilities.set(command,cached);}
+    if(cached.capabilities.editorBundle!==1){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
+  }
   const deqs=[];
   const open=new Map();for(const [u,t] of opts.openDocs||[]){try{if(u.toLowerCase().endsWith(".deq"))open.set(path.resolve(fileURLToPath(u)).toLowerCase(),t);}catch{}}
   try {let dir=path.dirname(fileURLToPath(uri)),base=path.basename(fileURLToPath(uri),".qsl")+".deq";
     outer:for(let depth=0;depth<3;depth++){for(const f of [path.join(dir,base),path.join(dir,"schema.deq")]){const edit=open.get(path.resolve(f).toLowerCase());if(edit!==undefined){deqs.push("--deq-text",edit);break outer;}if(fs.existsSync(f)){deqs.push(f);break outer;}}dir=path.dirname(dir);}
   }catch{}
-  // Neighboring/open QSL macro declarations are supplied to the same native
-  // expander. Custom build.rs input scopes remain explicit in project docs.
-  const own=new Set(report.structs.map(s=>s.name.x)),macroSources=new Map();
-  for(const [u,t] of opts.openDocs||[]){if(u!==uri&&u.toLowerCase().endsWith(".qsl"))macroSources.set(u,t);}
+  // Rust declarations are read by Syn in the native bridge. Never interpret a
+  // QSL [macro] flag or attempt Rust field expansion with a JS regex parser.
+  const macroSources=new Map();
+  for(const [u,t] of opts.openDocs||[]){if(u.toLowerCase().endsWith(".rs"))macroSources.set(u,t);}
   try{const dir=path.dirname(fileURLToPath(uri));let total=0,count=0;
-    for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(++count>256)break;if(entry.isFile()&&entry.name.endsWith(".qsl")){const f=path.join(dir,entry.name);const size=fs.statSync(f).size;if(size>1024*1024||total+size>4*1024*1024)continue;total+=size;const u=require("url").pathToFileURL(f).href;if(u!==uri&&!macroSources.has(u))macroSources.set(u,fs.readFileSync(f,"utf8"));}}
+    const directories=new Set([dir,path.join(dir,"src"),path.join(path.dirname(dir),"src")]);
+    for(const folder of directories){if(!fs.existsSync(folder))continue;for(const entry of fs.readdirSync(folder,{withFileTypes:true})){if(++count>256)break;if(entry.isFile()&&entry.name.endsWith(".rs")){const f=path.join(folder,entry.name),size=fs.statSync(f).size;if(size>1024*1024||total+size>4*1024*1024)continue;total+=size;const u=require("url").pathToFileURL(f).href;if(!macroSources.has(u))macroSources.set(u,fs.readFileSync(f,"utf8"));}}}
   }catch{}
-  for(const content of macroSources.values()){if(content.length>1024*1024)continue;for(const st of analyze(content).structs){if(Object.hasOwn(st.attrs,"macro")&&!own.has(st.name.x)){own.add(st.name.x);deqs.push("--macro-text",content.slice(st.start,st.end));}}}
-  let result;try{result=spawnSync(command,opts.kind==="deq"?["--deq-stdin"]:deqs,{input:text,encoding:"utf8",timeout:3000,maxBuffer:1024*1024,windowsHide:true});}catch{return report;}
+  const rust=[...macroSources.values()].filter(t=>t.length<=1024*1024&&/#\s*\[\s*(?:\w+::)*(?:qsl_macro|schem_macro)\b/.test(t));
+  const chunks=[],word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n);return b;},add=s=>{const b=Buffer.from(s);chunks.push(word(b.length),b);};add(text);chunks.push(word(rust.length));for(const r of rust)add(r);
+  let result;try{result=spawnSync(command,opts.kind==="deq"?["--deq-stdin"]:["--editor-bundle",...deqs],{input:opts.kind==="deq"?text:Buffer.concat(chunks),encoding:"utf8",timeout:3000,maxBuffer:1024*1024,windowsHide:true});}catch{return report;}
   if(result.status!==0)return report;
-  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.diags=report.diags.filter(d=>d.sev!==1&&!report.plans.some(p=>p.structureMacro&&d.m===`Unknown type '${p.name}'`));}
+  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.diags=report.diags.filter(d=>d.sev!==1&&!(native.rustMacros||[]).some(n=>d.m===`Unknown type '${n}'`));}
     else{const at=Buffer.from(text).subarray(0,native.offset||0).toString("utf8").length;report.diags=report.diags.filter(d=>d.sev===1);report.diags.push({s:Math.max(0,at-1),e:at,m:native.message,sev:1});}
   }catch{}return report;
 }

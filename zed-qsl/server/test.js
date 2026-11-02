@@ -24,11 +24,14 @@ test("compression and field modifiers are retained",()=>{
   const a=analyze("&A{str(0..100) a|binary_opt=guard|;str?(0..255) b|decompress=true|;}");
   assert.equal(a.diags.filter(d=>d.sev===1).length,0);assert.equal(a.structs[0].fields.get("b").modifiers.decompress,"true");
 });
-test("recursive macro expansion preserves standalone types and field constraints",()=>{
-  const s="&P{Meta first;Meta second;u8? tail;}&Meta[macro]{Base base;u16 kind;}&Base[macro]{u64 id;}";
-  const a=analyze(s);assert.equal(a.diags.filter(d=>d.sev===1).length,0);assert.equal(a.plans.find(p=>p.name==="P").fieldCount,5);assert(a.plans.find(p=>p.name==="Meta").structureMacro);
-  for(const source of ["&A[macro]{A a;}","&M[macro]{u8 id;}&P{M m;u8 m_id;}","&M[macro]{u8? id;}&P{M m;u8 required;}"]){assert(analyze(source).diags.some(d=>d.sev===1));}
-  let empty="&M0[macro]{}";for(let i=1;i<32;i++)empty+=`&M${i}[macro]{M${i-1} a;M${i-1} b;}`;assert.equal(analyze(empty).diags.filter(d=>d.sev===1).length,0);
+test("macro marking belongs to Rust declarations",()=>{
+  assert(analyze("&Meta[macro]{u64 id;}").diags.some(d=>/Mark the Rust struct/.test(d.m)));
+  const a=analyze("&P{Meta first;u8? tail;}");assert.equal(a.structs.length,1);assert.equal(a.plans[0].maximum,null);
+});
+test("an old or incompatible native bridge leaves a labelled advisory plan",()=>{
+  const old=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=process.execPath;
+  try{const r=editorAnalysis("&P{u64 id;}","file:///tmp/model.qsl",{kind:"qsl"});assert.equal(r.plans[0].approximate,true);assert(r.diags.some(d=>/source-bundle protocol/.test(d.m)));}
+  finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
 const native=path.resolve(__dirname,"../../../qsl/target/release/qsl-analyze.exe");
 test("static opt_table has no wire directory, with explicit legacy compatibility",()=>{
@@ -37,6 +40,11 @@ test("static opt_table has no wire directory, with explicit legacy compatibility
   assert.equal(analyze("&A[opt_table=legacy]"+source).plans[0].maximum,24);
   assert.equal(analyze("&A[opt_table]{u32 id;u8? a;u8? b;}").plans[0].maximum,7);
   assert.equal(analyze("&A[opt_table]{u32 id;str?(0) empty;}").plans[0].maximum,5);
+});
+test("length graph distinguishes equal scalars and forced string presence",()=>{
+  const a=analyze("&P[opt_table]{i32 id;u8? a;u8? b;}").plans[0];assert.deepEqual(a.lengthGraph.events.map(e=>[e.start,e.end,e.forced,e.possible]),[[0,0,0,0],[1,1,0,3],[2,2,3,3]]);
+  const s=analyze("&S[opt_table]{u32 id;str?(3..33) name;str?(1..255) description;}").plans[0];assert.equal(s.maximum,294);assert.equal(s.lengthGraph.metadataBytes,2);const at34=s.lengthGraph.events.find(e=>e.start<=34&&e.end>=34);assert.equal(at34.forced,2);assert.equal(at34.possible,3);assert.match(describe(s),/\(L > 33\) as usize/);
+  assert.equal(analyze("&P[opt_table,predict_seq]{i32 id;u8? a;u8? b;}").diags.filter(d=>d.sev===1).length,0);
 });
 test("exact numerical payload plans retain both operands and show raw fallback",()=>{
   const fields="{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64(0..15) d;}";
@@ -76,9 +84,12 @@ test("native editor expands nested macros from unsaved neighboring files",{skip:
   const old=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
   try{
     const {pathToFileURL}=require("node:url"),root=path.resolve(__dirname,"editor-fixture");
-    const uri=pathToFileURL(path.join(root,"use.qsl")).href,defs=pathToFileURL(path.join(root,"defs.qsl")).href;
-    const report=editorAnalysis("&Packet{Meta meta;}",uri,{kind:"qsl",openDocs:new Map([[defs,"&Meta[macro]{Base base;u16 kind;}&Base[macro]{u64 id;}"]])});
+    const uri=pathToFileURL(path.join(root,"use.qsl")).href,defs=pathToFileURL(path.join(root,"models.rs")).href;
+    const report=editorAnalysis("&Packet{Meta meta;}",uri,{kind:"qsl",openDocs:new Map([[defs,"#[qsl::qsl_macro] struct Meta{base:Base,kind:u16} #[qsl::schem_macro] struct Base{id:u64}"]])});
     assert.equal(report.diags.filter(d=>d.sev===1).length,0,JSON.stringify(report.diags));assert.equal(report.plans.find(p=>p.name==="Packet").fieldCount,2);assert.equal(report.plans.find(p=>p.name==="Packet").maximum,10);
+    assert(!report.diags.some(d=>d.m==="Unknown type 'Meta'"));
+    for(const [q,r]of [["&P{M m;}","#[qsl_macro]struct M{x:M}"],["&P{M m;u8 required;}","#[qsl_macro]struct M{x:Option<u8>}"]])assert(editorAnalysis(q,uri,{kind:"qsl",openDocs:new Map([[defs,r]])}).diags.some(d=>d.sev===1));
+    const large="//"+"a".repeat(40000)+"\n#[qsl_macro]struct Wide{id:u64}";assert.equal(editorAnalysis("&P{Wide data;}",uri,{kind:"qsl",openDocs:new Map([[defs,large]])}).plans[0].maximum,8);
   }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
 test("LSP stdio: diagnostics, hover and optional-tail quickfix",async()=>{
