@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test"),assert=require("node:assert/strict"),path=require("node:path"),fs=require("node:fs"),{spawn}=require("node:child_process"),{pathToFileURL,fileURLToPath}=require("node:url");
 const {editorAnalysis}=require("./qsl-server"),ui=require("./editor-features"),i18n=require("./i18n");
-const native=path.resolve(__dirname,"../../../qsl/target/release/qsl-analyze.exe"),source="&Packet[opt_table,safety]{i32 id;u8? a;u8? b;}",uri=pathToFileURL(path.resolve(__dirname,"editor-fixture/packet.qsl")).href;
+const native=path.resolve(__dirname,"../../../qsl/target/release/qsl-analyze.exe"),source="&Packet[predict_seq,opt_table,safety]{i32 id;u8? a;u8? b;}",uri=pathToFileURL(path.resolve(__dirname,"editor-fixture/packet.qsl")).href;
 function client(language="en",extra={}){
  const child=spawn(process.execPath,[path.join(__dirname,"qsl-server.js")],{stdio:["pipe","pipe","pipe"],windowsHide:true,env:{...process.env,QSL_ANALYZER:fs.existsSync(native)?native:"",QSL_ANALYSIS_DIR:path.join(__dirname,".analysis")}});
  let buffer=Buffer.alloc(0),seq=0;const pending=new Map(),notifications=[],shown=[];let stderr="";child.stderr.on("data",chunk=>stderr+=chunk);

@@ -34,16 +34,16 @@ test("an old or incompatible native bridge leaves a labelled advisory plan",()=>
   finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
 const native=path.resolve(__dirname,"../../../qsl/target/release/qsl-analyze.exe");
-test("static opt_table has no wire directory, with explicit legacy compatibility",()=>{
+test("opt_table dispatch is independent of length prediction and legacy directories",()=>{
   const source="{u32 id;u8? a;u16? b;u32? c;}";
-  const a=analyze("&A[opt_table]"+source);assert.equal(a.plans[0].maximum,11);assert.match(describe(a.plans[0]),/critical lengths/);
+  const a=analyze("&A[opt_table]"+source);assert.equal(a.plans[0].maximum,12);assert.match(describe(a.plans[0]),/tag-indexed reader dispatch/);assert.equal(a.plans[0].lengthGraph,null);assert.equal(a.plans[0].predictSequence,false);assert.equal(a.plans[0].tagDispatch,true);
   assert.equal(analyze("&A[opt_table=legacy]"+source).plans[0].maximum,24);
   assert.equal(analyze("&A[opt_table]{u32 id;u8? a;u8? b;}").plans[0].maximum,7);
   assert.equal(analyze("&A[opt_table]{u32 id;str?(0) empty;}").plans[0].maximum,5);
 });
 test("length graph distinguishes equal scalars and forced string presence",()=>{
-  const a=analyze("&P[opt_table]{i32 id;u8? a;u8? b;}").plans[0];assert.deepEqual(a.lengthGraph.events.map(e=>[e.start,e.end,e.forced,e.possible]),[[0,0,0,0],[1,1,0,3],[2,2,3,3]]);
-  const s=analyze("&S[opt_table]{u32 id;str?(3..33) name;str?(1..255) description;}").plans[0];assert.equal(s.maximum,294);assert.equal(s.lengthGraph.metadataBytes,2);const at34=s.lengthGraph.events.find(e=>e.start<=34&&e.end>=34);assert.equal(at34.forced,2);assert.equal(at34.possible,3);assert.match(describe(s),/\(L > 33\) as usize/);
+  const a=analyze("&P[predict_seq,opt_table]{i32 id;u8? a;u8? b;}").plans[0];assert.deepEqual(a.lengthGraph.events.map(e=>[e.start,e.end,e.forced,e.possible]),[[0,0,0,0],[1,1,0,3],[2,2,3,3]]);
+  const s=analyze("&S[predict_seq,opt_table]{u32 id;str?(3..33) name;str?(1..255) description;}").plans[0];assert.equal(s.maximum,294);assert.equal(s.lengthGraph.metadataBytes,2);const at34=s.lengthGraph.events.find(e=>e.start<=34&&e.end>=34);assert.equal(at34.forced,2);assert.equal(at34.possible,3);assert.match(describe(s),/\(L > 33\) as usize/);
   assert.equal(analyze("&P[opt_table,predict_seq]{i32 id;u8? a;u8? b;}").diags.filter(d=>d.sev===1).length,0);
 });
 test("exact numerical payload plans retain both operands and show raw fallback",()=>{
@@ -60,7 +60,7 @@ test("native payload and static graph plans match the generator",{skip:!fs.exist
   try{
     const result=editorAnalysis("&A[quant=Q16,opt_table,safety]{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64?(0..15) d;}","file:///tmp/quant.qsl",{kind:"qsl"});
     assert.equal(result.diags.filter(d=>d.sev===1).length,0,JSON.stringify(result.diags));const p=result.plans[0];
-    assert.equal(p.payloadQuantActive,true);assert.equal(p.maximum,3);assert.equal(p.payloadPadding,1);assert.match(p.staticOptional,/Boolean graph/);
+    assert.equal(p.payloadQuantActive,true);assert.equal(p.maximum,3);assert.equal(p.payloadPadding,1);assert.match(p.staticOptional,/no wire tags/);assert.equal(p.tagDispatch,false);
   }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
 test("native generator plans agree with advisory quantum analysis",{skip:!fs.existsSync(native)},()=>{
@@ -142,4 +142,14 @@ test("universal checked schemas and native maximum data config",()=>{
  assert.equal(analyze("!config MAX_DATA_SIZE = 65535;",{kind:"deq"}).diags.length,0);
  const prefix="!config MAX_DATA_SIZE = ",ui=require("./editor-features");assert(ui.completions(a,prefix,prefix.length,"ru").items.some(i=>i.label==="65535"));
  assert(analyze("!config MAX_DATA_SIZE = 0;",{kind:"deq"}).diags.some(d=>d.sev===1));
+});
+
+test("native and advisory distinguish tag-only and combined optional modes",{skip:!fs.existsSync(native)},()=>{
+ const old=process.env.QSL_ANALYZER;process.env.QSL_ANALYZER=native;
+ try{for(const attrs of ["opt_table","predict_seq,opt_table","predict_seq"]){
+ const text=`&A[${attrs}]{u32 id;u8? a;u16? b;}`;
+ const advisory=analyze(text).plans[0],exact=editorAnalysis(text,"file:///tmp/modes.qsl",{kind:"qsl"}).plans[0];
+ assert.equal(Boolean(exact.approximate),false);for(const key of ["maximum","predictSequence","tagDispatch"])assert.equal(exact[key],advisory[key],`${attrs}: ${key}`);
+ assert.equal(Boolean(exact.lengthGraph),Boolean(advisory.lengthGraph));
+ }}finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });

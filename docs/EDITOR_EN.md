@@ -82,3 +82,7 @@ General byte QPS has a separate 16 B envelope and explicit region APIs; its orig
 ## Hashes and data limit
 
 `USE_HASH = xxHash` / `xxHash128` selects schema identity. The layout inspector shows strict/light hashes, version and completeness. `MAX_DATA_SIZE = 65535` bounds the frame, QPS restoration and aggregate value bytes. Every schema has checked methods; safety is a compatibility attribute. The native analyzer must report schemaHashVersion=1 and checkedSchemas=1. Rebuild qsl-analyze after updating; config diagnostics and completion support RU/EN.
+
+## Optional modes · 0.7.1 / Режимы optional
+
+`predict_seq`: length → numeric index → presence. `opt_table`: tag → static function table → reader. Combined `[predict_seq,opt_table]` preserves the old mixed wire format. Отдельный opt_table сохраняет default; для прежнего смешанного формата нужны оба атрибута. Обновите native-анализатор; capability `optionalModes: 2` предотвращает подмену точного плана старой версией.

@@ -84,3 +84,7 @@ cargo build --manifest-path zed-qsl/Cargo.toml --target wasm32-wasip2 --release 
 ## Хэши и предел данных
 
 `USE_HASH = xxHash` / `xxHash128` выбирает идентичность схемы. Просмотр раскладки показывает строгий и лёгкий хэши, версию и полноту. `MAX_DATA_SIZE = 65535` задаёт предел кадра, восстановления QPS и суммарного объёма значений. Валидация доступна каждой схеме; safety сохранён как совместимый атрибут. Native-анализатор должен объявлять schemaHashVersion=1 и checkedSchemas=1. После обновления пересоберите qsl-analyze; ошибки конфигурации подчёркиваются на RU/EN.
+
+## Optional modes · 0.7.1 / Режимы optional
+
+`predict_seq`: length → numeric index → presence. `opt_table`: tag → static function table → reader. Combined `[predict_seq,opt_table]` preserves the old mixed wire format. Отдельный opt_table сохраняет default; для прежнего смешанного формата нужны оба атрибута. Обновите native-анализатор; capability `optionalModes: 2` предотвращает подмену точного плана старой версией.

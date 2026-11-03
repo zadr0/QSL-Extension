@@ -62,8 +62,10 @@ function analyzeLayout(structs, configs = {}) {
       if(["qps","quant"].includes(k)&&v&&!["Q2","Q4","Q8","Q16"].includes(v))error(s.name,"quant expects Q2, Q4, Q8 or Q16");
       if(k==="opt_table"&&v&&!["static","legacy"].includes(v))error(s.name,"opt_table expects static or legacy");
     }
-    const predictive = state_bits || Object.hasOwn(attrs,"predict_seq")&&!Object.hasOwn(attrs,"opt_table");
-    const staticOptional=Object.hasOwn(attrs,"opt_table")&&attrs.opt_table!=="legacy";
+    const predictSequence=Object.hasOwn(attrs,"predict_seq")&&!state_bits;
+    const predictive = state_bits || predictSequence&&!Object.hasOwn(attrs,"opt_table");
+    const tagDispatch=Object.hasOwn(attrs,"opt_table")&&attrs.opt_table!=="legacy";
+    const staticOptional=tagDispatch&&predictSequence;
     if(attrs.opt_table==="legacy"&&(state_bits||Object.hasOwn(attrs,"predict_seq")))error(s.name,"Legacy wire offsets conflict with predictive layouts");
     if(Object.hasOwn(attrs,"quant")&&(Object.hasOwn(attrs,"compact")||Object.hasOwn(attrs,"alignment")||attrs.optionals==="bitmap"||attrs.opt_table==="legacy"))error(s.name,"quant conflicts with compact, alignment, bitmap and legacy offsets");
     const strictTail=true;
@@ -124,11 +126,11 @@ function analyzeLayout(structs, configs = {}) {
       else if(!Object.hasOwn(attrs,"predict_seq")&&optional.length)maximum+=Math.ceil((optional.length===1?1:Math.ceil(Math.log2(optional.length+1))+optional.length*Math.ceil(Math.log2(Math.max(1,fields.length))))/8);
     }
     const payload=payloadPlan(fields,attrs,maximum);
-    if(payload.payloadQuantActive){maximum=payload.payloadMaximum;if(Object.hasOwn(attrs,"predict_seq")&&!staticOptional)error(s.name,"quant cannot infer field presence from compressed byte length; use opt_table or state_bits");if(state_bits&&quantum!==1)error(s.name,"Payload bit-prefix graphs use direct D, not Q_table length lookup; combine quant with plain state_bits");}
+    if(payload.payloadQuantActive){maximum=payload.payloadMaximum;if(predictSequence&&!tagDispatch)error(s.name,"quant cannot infer field presence from compressed byte length; use opt_table or state_bits");if(state_bits&&quantum!==1)error(s.name,"Payload bit-prefix graphs use direct D, not Q_table length lookup; combine quant with plain state_bits");}
     if(qps&&!payload.payloadQuantActive&&fields.length===1&&fields[0].type.name.x==="u8")diags.push({s:fields[0].name.s,e:fields[0].name.e,sev:2,m:"A single u8 cannot benefit from grouping; exact QPS keeps raw data when framing costs more"});
     const slots=Number(configs.QSL_RT_DEFAULT||16),eligible=maximum!==null&&(maximum+payload.payloadPadding)*slots<=64*1024*1024;
-    const mode=payload.payloadQuantActive&&staticOptional?"packed bit-prefix Boolean graph":staticOptional?(plainIndexBytes?"static critical lengths; no wire directory":"static prefix graph with presence bits or EOF predicate; no wire directory"):attrs.opt_table==="legacy"?"legacy wire offset directory":"disabled";
-    plans.push({sourceFields:fields,compact:Object.hasOwn(attrs,"compact"),name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,qpsByteCodecRevision:3,qpsByteHeader:16,qpsByteMaximum:maximum===null?null:maximum+16,qpsByteAPI:true,stateBits:state_bits,stateBitsQuantum:quantum,quantum:qps?payload.payloadQuantum:quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:staticOptional&&Object.hasOwn(attrs,"predict_seq"),optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:true,maxDataSize:Number(configs.MAX_DATA_SIZE||65535),suggestFixedPrefix,approximate:true});
+    const mode=payload.payloadQuantActive&&tagDispatch?"packed numeric kernel; no wire tags":staticOptional?(plainIndexBytes?"static critical lengths; no wire directory":"static prefix graph with presence bits or EOF predicate; no wire directory"):tagDispatch?(state_bits?"descriptor presence with tag-indexed reader dispatch":"tag-indexed reader dispatch; default wire format"):attrs.opt_table==="legacy"?"legacy wire offset directory":"disabled";
+    plans.push({sourceFields:fields,compact:Object.hasOwn(attrs,"compact"),name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,qpsByteCodecRevision:3,qpsByteHeader:16,qpsByteMaximum:maximum===null?null:maximum+16,qpsByteAPI:true,stateBits:state_bits,stateBitsQuantum:quantum,quantum:qps?payload.payloadQuantum:quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:false,predictSequence,tagDispatch:tagDispatch&&!payload.payloadQuantActive,optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:true,maxDataSize:Number(configs.MAX_DATA_SIZE||65535),suggestFixedPrefix,approximate:true});
   }
   return {plans,diags};
 }

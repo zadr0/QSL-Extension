@@ -24,7 +24,6 @@ function wire(st,p){
  else if(p.lengthGraph){min=max=p.lengthGraph.metadataBytes*8;}
  else if(p.stateBits){min=max=32;}else if(predict){min=max=0;}
  else if(attrs.opt_table==="legacy"&&n>1){min=max=(1+4*n)*8;}
- else if(Object.hasOwn(attrs,"opt_table")){min=max=p.maximum===null?null:0;}
  else if(attrs.optionals==="bitmap"){min=max=Math.ceil(st.fields.size/32)*32;}
  else{min=bits(n);max=min+(n>1?n*Math.ceil(Math.log2(Math.max(1,st.fields.size))):0);if(!compact){min=Math.ceil(min/8)*8;max=Math.ceil(max/8)*8;}}
  const headerMin=min,headerMax=max,fields=[],prior=[];
@@ -47,6 +46,7 @@ function fieldTable(st,p,lang,limit=8){const w=wire(st,p),rows=w.fields.slice(0,
 function schemaHover(st,p,lang,showFields=true){
  const w=wire(st,p),meta=bitRange(w.headerMinBits,w.headerMaxBits,lang);
  const rows=[[t(lang,"scalarQps"),p.qps?`Q${p.quantum} · ${t(lang,p.payloadQuantActive?"lossless":"rawFallback")}`:t(lang,"off")],[t(lang,"frame"),frameSize(st,p,lang)],[t(lang,"metadata"),meta],["RT",p.rtEligible?`${t(lang,p.rtEnabled?"on":"off")} · ${p.slots} ${t(lang,"slots")}`:t(lang,"rtMissing")],[t(lang,"validation"),t(lang,"on")],[t(lang,"dataLimit"),`${p.maxDataSize??65535} B`],["inline",diagnostic(p.inline,lang)],[t(lang,"source"),t(lang,p.approximate?"advisory":"native")]];
+ rows.push(["predict_seq",t(lang,p.predictSequence?"on":"off")],["opt_table",t(lang,p.tagDispatch?"on":"off")]);
  if(p.hashes)rows.push([t(lang,"hashTitle"),`${p.hashes.algorithm} · v${p.hashes.version}${p.hashes.complete?"":` · ${t(lang,"unknown")}`}`]);
  if(p.qps)rows.push([t(lang,"wholeQps"),p.qpsByteAPI?`serialize_qps_to · ${p.qpsByteHeader||16} B ${t(lang,"envelope")}`:t(lang,"requiresSafety")]);
  if(p.stateBits)rows.push(["state_bits",`Q${p.stateBitsQuantum} · D ${p.dBits}/32 ${t(lang,"bits")}`]);
