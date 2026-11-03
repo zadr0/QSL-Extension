@@ -2,7 +2,7 @@
 
 [Русский](EDITOR_RU.md)
 
-QSL 0.6 uses standard editor features instead of a single prose tooltip.
+QSL 0.7 uses standard editor features instead of a single prose tooltip.
 
 | Where | What is shown |
 |---|---|
@@ -78,3 +78,7 @@ With the default Windows Zed keymap, `Ctrl+.` opens code actions.
 Rust macro references show a group inlay with the number of expanded fields. Their hover lists every flattened member, size and offset; it never assigns the first member's size to the whole group.
 
 General byte QPS has a separate 16 B envelope and explicit region APIs; its original length is unquantized. Hover labels scalar specialization separately. Byte bridge revision 3 is required; tiny u8 schemas receive a non-fatal no-saving warning.
+
+## Hashes and data limit
+
+`USE_HASH = xxHash` / `xxHash128` selects schema identity. The layout inspector shows strict/light hashes, version and completeness. `MAX_DATA_SIZE = 65535` bounds the frame, QPS restoration and aggregate value bytes. Every schema has checked methods; safety is a compatibility attribute. The native analyzer must report schemaHashVersion=1 and checkedSchemas=1. Rebuild qsl-analyze after updating; config diagnostics and completion support RU/EN.

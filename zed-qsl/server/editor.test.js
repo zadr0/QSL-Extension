@@ -65,3 +65,13 @@ test("macro field hover includes every expanded field instead of only its first 
 test("whole-payload QPS is separate from scalar layout and emits a single-u8 warning",{skip:!fs.existsSync(native)},()=>{
  const r=editorAnalysis("&Single[qps,safety]{u8 value;}",uri,{analyzerPath:native});assert.equal(r.plans[0].qpsByteCodecRevision,3);assert.equal(r.plans[0].qpsByteHeader,16);assert.equal(r.plans[0].qpsByteMaximum,17);assert.equal(r.plans[0].qpsByteAPI,true);assert.equal(r.plans[0].payloadQuantActive,false);const warnings=r.diags.filter(d=>d.sev===2&&d.m.startsWith("A single u8"));assert.equal(warnings.length,1);assert.match(i18n.diagnostic(warnings[0].m,"ru"),/Одиночный u8/);assert(!r.diags.some(d=>d.sev===1));
 });
+
+test("native schema hashes: names, storage, config and layout inspector",{skip:!fs.existsSync(native)},()=>{
+ const source="&Plain{str text;}",a=editorAnalysis(source,uri,{analyzerPath:native}),h=a.plans[0].hashes;
+ assert.equal(h.algorithm,"xxHash");assert.equal(h.bits,64);assert.equal(h.version,1);assert.equal(h.strict.length,16);assert.equal(h.complete,true);
+ const b=editorAnalysis("&Renamed{str data|binary_opt=guard|;}",uri,{analyzerPath:native}).plans[0].hashes;assert.equal(h.light,b.light);assert.notEqual(h.strict,b.strict);
+ const {spawnSync}=require("node:child_process"),native128=JSON.parse(spawnSync(native,["--deq-text","!config USE_HASH = xxHash128;"],{input:source,encoding:"utf8",windowsHide:true}).stdout);
+ assert(native128.ok);assert.equal(native128.schemas[0].hashes.bits,128);assert.equal(native128.schemas[0].hashes.light.length,32);
+ for(const lang of ["ru","en"]){const inspected=ui.inspect(a.structs[0],a.plans[0],lang);assert(inspected.includes(h.strict));assert(inspected.includes(h.light));assert.match(inspected,lang==="ru"?/Строгий хэш/:/Strict hash/);}
+ const opaque=editorAnalysis("&P{External value;}",uri,{analyzerPath:native}).plans[0];assert.equal(opaque.hashes.complete,false);
+});

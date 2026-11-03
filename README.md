@@ -2,13 +2,15 @@
 
 [Interactive editor guide (EN)](docs/EDITOR_EN.md) · [Интерактивный анализатор (RU)](docs/EDITOR_RU.md)
 
-Version 0.6 adds general byte-operand QPS APIs and single-u8 warnings, and separates QPS operand compression from opt_table prediction and adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
+Version 0.7 adds schema identities, universal checked APIs and MAX_DATA_SIZE (65535 by default), while retaining general byte-operand QPS APIs and single-u8 warnings, and separates QPS operand compression from opt_table prediction and adds wire-size/offset inlays, field hovers, CodeLens inspectors, outline, completions, definitions and live RU/EN diagnostics. Enable inlay hints and CodeLens in Zed as shown in the guide.
 
 Tree-sitter grammar is at the repository root; the complete Zed extension is in `zed-qsl/`.
 
 Supported additions: `qps`, `qps=Q2|Q4|Q8|Q16`, exact numeric payload `quant=Q2|Q4|Q8|Q16`, unquantized `predict_seq`, static `opt_table`, schema-controlled `inline`, `inline=hint|always|never`, and DEQ generation configuration:
 
 ```text
+!config MAX_DATA_SIZE = 65535;
+!config USE_HASH = xxHash; // XXH3-64; xxHash128 selects XXH3-128
 !config QSL_RT = true;
 !config QSL_RT_DEFAULT = 16;
 ```
@@ -28,9 +30,9 @@ Supported source types include fixed integers, `Option<T>`, `String`, `&str`, `&
 
 Mechanisms and attributes are opt-in. Field order is mandatory for every schema: required fields first, optional fields last. The language server underlines violations and offers a quickfix. Moving a field changes the wire format; it is never applied automatically.
 
-Checked decoding is generated only for `[safety]`. It is invoked through `validate`, `deserialize_checked`, or `deserialize_checked_into`; ordinary trusted methods do not acquire validation overhead. `inline` is also explicit; the compiler chooses inlining without that attribute. QPS is disabled by default; `[qps]` selects Q16, and `QSL_RT` defaults to false.
+Checked decoding is generated for every schema. `[safety]` remains a compatible spelling. It is invoked through `validate`, `deserialize_checked`, or `deserialize_checked_into`; ordinary trusted methods do not acquire validation overhead. `inline` is also explicit; the compiler chooses inlining without that attribute. QPS is disabled by default; `[qps]` selects Q16, and `QSL_RT` defaults to false.
 
-Hover over a schema to inspect wire-size limits, RT eligibility, numeric operand widths, optional-state metadata, strings and inline policy. Macro references show all expanded members rather than a misleading first-child size. QPS does not require optional fields. Native analysis requires `qpsCodecRevision: 2`; an older binary leaves explicitly labelled advisory estimates.
+Hover over a schema to inspect wire-size limits, RT eligibility, numeric operand widths, optional-state metadata, strings and inline policy. Macro references show all expanded members rather than a misleading first-child size. QPS does not require optional fields. Native analysis requires `qpsCodecRevision: 2`, `schemaHashVersion: 1` and `checkedSchemas: 1`; an older binary leaves explicitly labelled advisory estimates.
 
 `[opt_table]` / `[opt_table=static]` analyzes payload length `L` and emits a numeric event index: for two optional bytes, `I = (L > 0) + (L > 1)`. Every critical boundary is derived from schema ranges. The index selects an event function in a module-level static `EVENT_TABLE`. Deterministic handlers never read a tag; ambiguous handlers read only the remaining field-state information. Adjacent equivalent intervals are merged. Larger selectors use a statically unrolled numeric hierarchy rather than one table entry for every payload byte.
 
@@ -68,3 +70,11 @@ The native-plan tests run when the adjacent QSL analyzer exists, and are explici
 QPS does not predict presence. `opt_table` owns length prediction. In addition to scalar specialization, checked schemas can use `ByteQps<Q>` over their entire serialized bytes, including UTF-8 and arrays. `[qps,safety]` generates explicit `serialize_qps_to(scratch,out)` and owned `deserialize_qps_into(input,restoration,out)`; borrowed schemas use `deserialize_qps` and borrow the restored region. Existing `Serializable` bytes are not silently replaced. The 16 B QPB3 envelope stores original length without quantization. Raw fallback pays the explicit framing cost; grouping four unrestricted u8 values does not guarantee fewer than 32 bits. Hover distinguishes scalar specialization, general byte APIs and prediction. A single u8 without a scalar saving receives a warning, not a schema error. The native bridge requires byte codec revision 3.
 
 QPS не предиктует поля: длину анализирует `opt_table`. Помимо числовой специализации, `ByteQps<Q>` работает со всем сериализованным payload, включая UTF-8 и массивы. Для `[qps,safety]` доступны явные методы общего кодека с scratch/output/restoration. Заимствованный результат живёт в восстановленном регионе. Существующий `Serializable` не меняет формат неявно. Заголовок QPB3 занимает 16 B и хранит исходную длину без квантования. Для raw-режима цена заголовка показывается явно. Объединение четырёх произвольных u8 не гарантирует сжатия 32 бит. В hover разделены специализация, общие API и предиктование; одиночный u8 без выигрыша получает предупреждение.
+
+## Schema identity / Идентичность схемы
+
+The native analyzer computes strict and light schema hashes before code generation. `!config USE_HASH = xxHash;` selects XXH3-64 by default; `xxHash128` selects XXH3-128. The layout inspector shows both digests, algorithm, descriptor version and completeness. Strict identity includes schema/field names; light identity omits them. Both include ordered data fields, domains and format-changing modes, and exclude safety, inline, matching String/byte ownership modes, defaults and RT allocation settings. Q_table representation is excluded; QPS quantum is included. No digest is invented by the advisory JavaScript analyzer.
+
+Native-анализатор вычисляет строгий и лёгкий хэши до генерации Rust. По умолчанию `USE_HASH = xxHash` выбирает XXH3-64; `xxHash128` — XXH3-128. Оба значения доступны в просмотре раскладки, с версией и признаком полноты. Строгий хэш включает имена схемы и полей; лёгкий их исключает. Порядок, диапазоны и формат данных учитываются в обоих. Настройки памяти, встраивания и проверок исключены. Внешний QslCustom помечается неполным: его реализация требует отдельного согласования. Предварительный JS-анализатор хэши не подделывает.
+
+Both xxHash variants are non-cryptographic. A matching hash is an identity check, not a proof against collisions or authentication. Rebuild qsl-analyze after updating the extension.

@@ -326,7 +326,9 @@ function analyze(text, opts = {}) {
       if(kind!=="deq")err(kw.s,kw.e,"!config belongs in a DEQ file");
       if(name.x==="QSL_RT"&&!/^(true|false)$/.test(value?.x||""))err(name.s,name.e,"QSL_RT expects true or false");
       else if(name.x==="QSL_RT_DEFAULT"&&!/^(?:[1-9]|[1-5][0-9]|6[0-4])$/.test(value?.x||""))err(name.s,name.e,"QSL_RT_DEFAULT must be 1..64 slots");
-      else if(!["QSL_RT","QSL_RT_DEFAULT"].includes(name.x))err(name.s,name.e,"Unknown generation configuration");
+      else if(name.x==="MAX_DATA_SIZE"&&/^[+-]?\d[\d_]*$/.test(value?.x||"")&&BigInt(value.x.replaceAll("_",""))<=0n)err(name.s,name.e,"MAX_DATA_SIZE must be 1..isize::MAX bytes");
+      else if(name.x==="USE_HASH"&&!["xxHash","xxHash128","XXH3_64","XXH3_128"].includes(value?.x))err(name.s,name.e,"USE_HASH expects xxHash or xxHash128");
+      else if(!["QSL_RT","QSL_RT_DEFAULT","USE_HASH","MAX_DATA_SIZE"].includes(name.x))err(name.s,name.e,"Unknown generation configuration");
       if(Object.hasOwn(configs,name.x))err(name.s,name.e,"Duplicate generation configuration");
       configs[name.x]=value?.x;return;
     }
@@ -514,7 +516,7 @@ function editorAnalysis(text,uri,opts={}) {
     const modified=fs.statSync(command).mtimeMs;let cached=analyzerCapabilities.get(command);
     if(!cached||cached.modified!==modified){let capabilities={};try{const r=spawnSync(command,["--capabilities"],{input:"",encoding:"utf8",timeout:3000,windowsHide:true});capabilities=JSON.parse(r.stdout);}catch{}cached={modified,capabilities};analyzerCapabilities.set(command,cached);}
     report.nativeCapabilities=cached.capabilities;
-    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.qpsCodecRevision!==2||cached.capabilities.qpsByteCodecRevision!==3){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
+    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.schemaHashVersion!==1||cached.capabilities.checkedSchemas!==1||cached.capabilities.qpsCodecRevision!==2||cached.capabilities.qpsByteCodecRevision!==3){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
   }
   const deqs=[];
   const open=new Map();for(const [u,t] of opts.openDocs||[]){try{if(u.toLowerCase().endsWith(".deq"))open.set(path.resolve(fileURLToPath(u)).toLowerCase(),t);}catch{}}
@@ -648,7 +650,7 @@ function main() {
    clientLocale=params.locale||"";clientCaps=params.capabilities||{};configure(params.initializationOptions||{});
    const folders=(params.workspaceFolders||[]).map(f=>f.uri);if(!folders.length&&params.rootUri)folders.push(params.rootUri);
    if(folders.length){roots=[];for(const u of folders)try{roots.push(fileURLToPath(u));}catch{}}
-   return reply(m.id,{capabilities:{positionEncoding:"utf-16",textDocumentSync:{openClose:true,change:1,save:{includeText:false}},hoverProvider:true,codeActionProvider:true,inlayHintProvider:{resolveProvider:false},codeLensProvider:{resolveProvider:true},documentSymbolProvider:true,definitionProvider:true,completionProvider:{triggerCharacters:["[",",","=","|","!"],resolveProvider:false},foldingRangeProvider:true,executeCommandProvider:{commands:["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust","qsl.setLanguage"]},workspace:{workspaceFolders:{supported:true,changeNotifications:true}}},serverInfo:{name:"qsl-lsp",version:"0.6.0"}});
+   return reply(m.id,{capabilities:{positionEncoding:"utf-16",textDocumentSync:{openClose:true,change:1,save:{includeText:false}},hoverProvider:true,codeActionProvider:true,inlayHintProvider:{resolveProvider:false},codeLensProvider:{resolveProvider:true},documentSymbolProvider:true,definitionProvider:true,completionProvider:{triggerCharacters:["[",",","=","|","!"],resolveProvider:false},foldingRangeProvider:true,executeCommandProvider:{commands:["qsl.inspectLayout","qsl.inspectEvents","qsl.expandRust","qsl.setLanguage"]},workspace:{workspaceFolders:{supported:true,changeNotifications:true}}},serverInfo:{name:"qsl-lsp",version:"0.7.0"}});
   }
   if(m.method==="initialized"){
    if(clientCaps.workspace?.didChangeWatchedFiles?.dynamicRegistration)request("client/registerCapability",{registrations:[{id:"qsl-inputs",method:"workspace/didChangeWatchedFiles",registerOptions:{watchers:[{globPattern:"**/*.deq"},{globPattern:"**/*.rs"},{globPattern:"**/*.qsl"}]}}]}).catch(e=>process.stderr.write(`[qsl-lsp] ${e.message}\n`));return;

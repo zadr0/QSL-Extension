@@ -122,3 +122,24 @@ test("native QPS expands the screenshot's Rust template before optional analysis
  const exact=editorAnalysis("&P[qps,safety]{u64(0..15) a;u64(0..15) b;}",u,{kind:"qsl"});assert.equal(exact.plans[0].quantum,16);assert.equal(exact.plans[0].maximum,1);assert.equal(exact.plans[0].wireLayout.headerMaxBits,0);
  }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
+
+test("schema hash config validation and bilingual completions",()=>{
+  const ui=require("./editor-features"),i18n=require("./i18n");
+  for(const value of ["xxHash","xxHash128","XXH3_64","XXH3_128"])assert.equal(analyze(`!config USE_HASH = ${value};`,{kind:"deq"}).diags.length,0);
+  for(const value of ["md5","128","true"])assert(analyze(`!config USE_HASH = ${value};`,{kind:"deq"}).diags.some(d=>d.sev===1));
+  assert(analyze("!config USE_HASH = xxHash;!config USE_HASH = xxHash128;",{kind:"deq"}).diags.some(d=>d.sev===1));
+  for(const lang of ["ru","en"]){
+    const text="!config USE_HASH = ",r=analyze(text,{kind:"deq"}),items=ui.completions(r,text,text.length,lang).items;
+    assert.deepEqual(items.map(i=>i.label),["xxHash","xxHash128"]);
+    assert.match(items[0].documentation.value,/XXH3-64/);
+    const prefix="!config ";assert(ui.completions(r,prefix,prefix.length,lang).items.some(i=>i.label==="USE_HASH"));
+  }
+  assert.match(i18n.diagnostic("USE_HASH expects xxHash or xxHash128","ru"),/принимает/);
+});
+
+test("universal checked schemas and native maximum data config",()=>{
+ const a=analyze("&P{str text;}");assert.equal(a.plans[0].safety,true);assert.equal(a.plans[0].maxDataSize,65535);assert.equal(a.plans[0].qpsByteAPI,true);
+ assert.equal(analyze("!config MAX_DATA_SIZE = 65535;",{kind:"deq"}).diags.length,0);
+ const prefix="!config MAX_DATA_SIZE = ",ui=require("./editor-features");assert(ui.completions(a,prefix,prefix.length,"ru").items.some(i=>i.label==="65535"));
+ assert(analyze("!config MAX_DATA_SIZE = 0;",{kind:"deq"}).diags.some(d=>d.sev===1));
+});
