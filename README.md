@@ -68,3 +68,5 @@ cargo build --manifest-path zed-qsl/Cargo.toml --release --locked --target wasm3
 ```
 
 The editor discovers nearby DEQ and Rust sources and includes unsaved documents. Registering build inputs explicitly remains authoritative; see the guide for discovery limits and initialization options.
+
+Лицензия / License: [MIT](LICENSE).
