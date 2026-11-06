@@ -505,7 +505,7 @@
     "fields": {
       "end": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "binary_expression",
@@ -583,6 +583,37 @@
           },
           {
             "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "region_end",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "region_start",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string",
             "named": true
           }
         ]
@@ -708,6 +739,14 @@
         },
         {
           "type": "field",
+          "named": true
+        },
+        {
+          "type": "region_end",
+          "named": true
+        },
+        {
+          "type": "region_start",
           "named": true
         }
       ]
@@ -855,6 +894,14 @@
   },
   {
     "type": "#",
+    "named": false
+  },
+  {
+    "type": "#end_region",
+    "named": false
+  },
+  {
+    "type": "#region",
     "named": false
   },
   {

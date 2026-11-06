@@ -250,13 +250,22 @@ Schema hash configuration
 !config USE_HASH = xxHash;
 !config USE_HASH = xxHash128;
 ---
+
 (source_file
-  (config_statement (identifier) (identifier))
-  (config_statement (identifier) (identifier)))
+  (config_statement
+    (identifier)
+    (identifier))
+  (config_statement
+    (identifier)
+    (identifier)))
 
 ==================
 Aggregate data limit
 ==================
 !config MAX_DATA_SIZE = 65535;
 ---
-(source_file (config_statement (identifier) (number)))
+
+(source_file
+  (config_statement
+    (identifier)
+    (number)))

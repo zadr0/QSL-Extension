@@ -1,0 +1,61 @@
+==================
+Native regions and open scalar bounds
+==================
+&Target[aggressive,transmutate,lifetime,safety,slots=4,loyal_cache] {
+ #region(aggressive_transmutate = "Meta");
+ u32(1..) id;
+ str(4) tag;
+ #end_region;
+}
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (struct_attributes
+      (attribute
+        (identifier))
+      (attribute
+        (identifier))
+      (attribute
+        (identifier))
+      (attribute
+        (identifier))
+      (attribute
+        (identifier)
+        (number))
+      (attribute
+        (identifier)))
+    (struct_body
+      (region_start
+        (identifier)
+        (string))
+      (field
+        (type
+          (identifier)
+          (size
+            (range
+              (number))))
+        (identifier))
+      (field
+        (type
+          (identifier)
+          (size
+            (number)))
+        (identifier))
+      (region_end))))
+
+==================
+Stack policy configuration
+==================
+!config STACK_LIMIT = 256;
+!config QSL_RT = true;
+---
+
+(source_file
+  (config_statement
+    (identifier)
+    (number))
+  (config_statement
+    (identifier)
+    (identifier)))

@@ -52,7 +52,10 @@ module.exports = grammar({
 
     struct_body: ($) => seq("{", repeat($._member), "}"),
 
-    _member: ($) => choice($.field, $.directive),
+    _member: ($) => choice($.field, $.directive, $.region_start, $.region_end),
+
+    region_start: ($) => seq("#region", "(", field("name", $.identifier), "=", field("value", $.string), ")", ";"),
+    region_end: (_) => seq("#end_region", ";"),
 
     // #padding_bits=24;
     directive: ($) =>
@@ -87,7 +90,7 @@ module.exports = grammar({
     // (N) or (A..B)
     size: ($) => seq("(", choice($.range, $._bound), ")"),
 
-    range: ($) => seq(field("start", $._bound), "..", field("end", $._bound)),
+    range: ($) => seq(field("start", $._bound), "..", optional(field("end", $._bound))),
 
     _bound: ($) => $._expression,
 
