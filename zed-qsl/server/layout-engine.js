@@ -5,7 +5,7 @@ function payloadPlan(fields,attrs,rawMaximum) {
   const result={payloadQuantRequested:Object.hasOwn(attrs,"quant"),payloadQuantActive:false,payloadQuantum:Number((attrs.quant||"Q2").replace("Q","")),payloadPadding:0,rawMaximum,payloadReason:"payload quantization disabled"};
   if(!result.payloadQuantRequested)return result;
   if(![2,4,8,16].includes(result.payloadQuantum)){result.payloadReason="quant expects Q2, Q4, Q8 or Q16";return result;}
-  let bits=0,required=0,residues=new Set([0]),padding=1;
+  let bits=0,required=0,residues=new Set([0]),padding=0;
   const literal=t=>{try{return t?.t==="number"&&!t.x.includes(".")?BigInt(t.x.replaceAll("_","")):null;}catch{return null;}};
   for(const f of fields){
     const n=f.type.name.x,match=/^([ui])(8|16|32|64)$/.exec(n);
@@ -14,7 +14,7 @@ function payloadPlan(fields,attrs,rawMaximum) {
     if(f.type.size){lo=literal(f.type.size.lo);hi=literal(f.type.size.hi);if(lo===null||hi===null||hi<lo){result.payloadReason="bounds need native evaluation; raw advisory fallback";return result;}}
     const span=hi-lo,b=span===0n?0:span.toString(2).length;
     const start=Math.max(...residues),word=[1,2,4,8,16].find(w=>w<=result.payloadQuantum&&w*8>=b+start)||result.payloadQuantum;
-    padding=Math.max(padding,word);bits+=b;if(!f.type.optional)required+=b;
+    bits+=b;if(!f.type.optional)required+=b;
     const next=new Set([...residues].map(r=>(r+b)&7));residues=f.type.optional?new Set([...residues,...next]):next;
   }
   const header=Object.hasOwn(attrs,"state_bits")?4:Math.ceil(fields.filter(f=>f.type.optional).length/8);
@@ -56,7 +56,7 @@ function analyzeLayout(structs, configs = {}) {
     if(Object.hasOwn(attrs,"qps"))attrs.quant=attrs.qps||"Q16";
     for (const [k,v] of Object.entries(attrs)) {
       if(k==="macro")error(s.name,"Mark the Rust struct with #[qsl::qsl_macro] or #[qsl::schem_macro]; [macro] is not a QSL attribute");
-      else if (!["qps","state_bits","quant","predict_seq","opt_table","inline","compact","alignment","lifetime","safety","optionals"].includes(k)) error(s.name,`Unknown schema attribute '${k}'`);
+      else if (!["qps","state_bits","quant","predict_seq","opt_table","inline","compact","alignment","lifetime","safety","optionals","aggressive","transmutate","loyal_cache","slots","cache"].includes(k)) error(s.name,`Unknown schema attribute '${k}'`);
       if (k === "state_bits" && ![1,2,4,8,16].includes(quantum)) error(s.name,"state_bits quantum must be Q1, Q2, Q4, Q8 or Q16");
       if (k === "inline" && v && !["hint","always","never"].includes(v)) error(s.name,"inline expects hint, always or never");
       if(["qps","quant"].includes(k)&&v&&!["Q2","Q4","Q8","Q16"].includes(v))error(s.name,"quant expects Q2, Q4, Q8 or Q16");
@@ -88,7 +88,7 @@ function analyzeLayout(structs, configs = {}) {
       const compression = f.modifiers.decompress === "true";
       if (string && hi !== null) width = fixedString ? hi : hi + (compression || f.modifiers.binary_opt === "inline" ? hi<=127?1:hi<=32767?2:4 : 4);
       if(state_bits && t.optional && string && hi!==null && !compression)width=hi;
-      if (!f.type.optional) {if (width === null) variableSeen = true; else if(variableSeen) suggestFixedPrefix = true;}
+      if (!f.type.optional) {if (width === null || string&&!fixedString || ["array","arr","vec"].includes(n)) variableSeen = true; else if(variableSeen) suggestFixedPrefix = true;}
       if (width === null || !Number.isSafeInteger(width)) maximum = null;
       else if(maximum !== null) maximum += width;
       if (f.type.optional) {
@@ -128,9 +128,9 @@ function analyzeLayout(structs, configs = {}) {
     const payload=payloadPlan(fields,attrs,maximum);
     if(payload.payloadQuantActive){maximum=payload.payloadMaximum;if(predictSequence&&!tagDispatch)error(s.name,"quant cannot infer field presence from compressed byte length; use opt_table or state_bits");if(state_bits&&quantum!==1)error(s.name,"Payload bit-prefix graphs use direct D, not Q_table length lookup; combine quant with plain state_bits");}
     if(qps&&!payload.payloadQuantActive&&fields.length===1&&fields[0].type.name.x==="u8")diags.push({s:fields[0].name.s,e:fields[0].name.e,sev:2,m:"A single u8 cannot benefit from grouping; exact QPS keeps raw data when framing costs more"});
-    const slots=Number(configs.QSL_RT_DEFAULT||16),eligible=maximum!==null&&(maximum+payload.payloadPadding)*slots<=64*1024*1024;
+    const slots=Number(attrs.slots||configs.QSL_RT_DEFAULT||16),eligible=maximum!==null&&(maximum+payload.payloadPadding)*slots<=64*1024*1024;
     const mode=payload.payloadQuantActive&&tagDispatch?"packed numeric kernel; no wire tags":staticOptional?(plainIndexBytes?"static critical lengths; no wire directory":"static prefix graph with presence bits or EOF predicate; no wire directory"):tagDispatch?(state_bits?"descriptor presence with tag-indexed reader dispatch":"tag-indexed reader dispatch; default wire format"):attrs.opt_table==="legacy"?"legacy wire offset directory":"disabled";
-    plans.push({sourceFields:fields,compact:Object.hasOwn(attrs,"compact"),name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,qpsByteCodecRevision:3,qpsByteHeader:16,qpsByteMaximum:maximum===null?null:maximum+16,qpsByteAPI:true,stateBits:state_bits,stateBitsQuantum:quantum,quantum:qps?payload.payloadQuantum:quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:false,predictSequence,tagDispatch:tagDispatch&&!payload.payloadQuantActive,optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:true,maxDataSize:Number(configs.MAX_DATA_SIZE||65535),suggestFixedPrefix,approximate:true});
+    plans.push({sourceFields:fields,compact:Object.hasOwn(attrs,"compact"),name:s.name.x,maximum,rtEligible:eligible,rtEnabled:configs.QSL_RT==="true"&&eligible,slots,qps,qpsByteCodecRevision:3,qpsByteHeader:16,qpsByteMaximum:maximum===null?null:maximum+16,qpsByteAPI:Object.hasOwn(attrs,"safety")&&fields.every(f=>/^[ui](8|16|32|64)$/.test(f.type.name.x)),stateBits:state_bits,stateBitsQuantum:quantum,quantum:qps?payload.payloadQuantum:quantum,dBits:bits,indexBytes,plainIndexBytes,reason,staticOptional:mode,lengthGraph:payload.payloadQuantActive?null:graph,predictSequenceHint:false,predictSequence,tagDispatch:tagDispatch&&!payload.payloadQuantActive,optionalNames:optional.map(f=>f.name.x),...payload,inline:Object.hasOwn(attrs,"inline")?(attrs.inline||"hint"):"compiler default",optionalCount:optional.length,fieldCount:fields.length,optionalTailRequired:strictTail,safety:Object.hasOwn(attrs,"safety"),maxDataSize:Number(configs.MAX_DATA_SIZE||65535),suggestFixedPrefix,approximate:true});
   }
   return {plans,diags};
 }

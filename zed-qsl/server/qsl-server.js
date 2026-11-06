@@ -210,7 +210,7 @@ function analyze(text, opts = {}) {
       if (!lo) return null;
       if (isP("..")) {
         p++;
-        const hi = parseBound();
+        const hi = isP(")") ? {t:"open",s:toks[p].s,e:toks[p].s,x:""} : parseBound();
         if (!hi) return null;
         const close = expectP(")");
         if (!close) return null;
@@ -228,7 +228,9 @@ function analyze(text, opts = {}) {
   function parseMember(st) {
     if (isP("#")) {
       p++;
-      if (!expectIdent("a directive name")) return sync();
+      const directive=expectIdent("a directive name");if(!directive)return sync();
+      if(directive.x==="region"){if(!expectP("("))return sync();if(!expectIdent("aggressive_transmutate"))return sync();expectP("=");parseValue();expectP(")");expectP(";");return;}
+      if(directive.x==="end_region"){expectP(";");return;}
       if (isP("=")) { p++; if (!parseValue()) return sync(); }
       expectP(";");
       return;
@@ -255,7 +257,11 @@ function analyze(text, opts = {}) {
         const key=toks[p++];
         let value="true";
         if (isP("=")) { p++; const v=parseValue();if(!v)return sync();value=v.x; }
-        record.modifiers[key.x]=value;
+        if(Object.hasOwn(record.modifiers,key.x))err(key.s,key.e,`Duplicate field modifier '${key.x}'`);
+      if(!["default","binary_opt","decompress"].includes(key.x))err(key.s,key.e,`Unknown field modifier '${key.x}'`);
+      if(key.x==="binary_opt"&&!["true","false","inline","guard","view"].includes(value))err(key.s,key.e,"binary_opt must be true, false, inline, guard or view");
+      if(key.x==="decompress"&&!["true","false"].includes(value))err(key.s,key.e,"decompress must be true or false");
+      record.modifiers[key.x]=value;
         if (!expectP("|")) return sync();
         if(isP("|"))p++;
       }
@@ -328,7 +334,7 @@ function analyze(text, opts = {}) {
       else if(name.x==="QSL_RT_DEFAULT"&&!/^(?:[1-9]|[1-5][0-9]|6[0-4])$/.test(value?.x||""))err(name.s,name.e,"QSL_RT_DEFAULT must be 1..64 slots");
       else if(name.x==="MAX_DATA_SIZE"&&/^[+-]?\d[\d_]*$/.test(value?.x||"")&&BigInt(value.x.replaceAll("_",""))<=0n)err(name.s,name.e,"MAX_DATA_SIZE must be 1..isize::MAX bytes");
       else if(name.x==="USE_HASH"&&!["xxHash","xxHash128","XXH3_64","XXH3_128"].includes(value?.x))err(name.s,name.e,"USE_HASH expects xxHash or xxHash128");
-      else if(!["QSL_RT","QSL_RT_DEFAULT","USE_HASH","MAX_DATA_SIZE"].includes(name.x))err(name.s,name.e,"Unknown generation configuration");
+      else if(!["QSL_RT","QSL_RT_DEFAULT","USE_HASH","MAX_DATA_SIZE","STACK_LIMIT"].includes(name.x))err(name.s,name.e,"Unknown generation configuration");
       if(Object.hasOwn(configs,name.x))err(name.s,name.e,"Duplicate generation configuration");
       configs[name.x]=value?.x;return;
     }
@@ -387,6 +393,7 @@ function analyze(text, opts = {}) {
         err(b.s, b.e, `${b.x} is out of range for ${n} (${lim.min}..${lim.max})`);
         return null;
       }
+      if ((cat === "text" || cat === "array") && cmp(v, 4294967295n) > 0){err(b.s,b.e,"String/array length must fit u32");return null;}
       if ((cat === "text" || cat === "array" || cat === "flags") && cmp(v, 0) < 0) {
         err(b.s, b.e, "Size cannot be negative"); return null;
       }
@@ -424,7 +431,7 @@ function analyze(text, opts = {}) {
     const n = t.name.x;
     const cat = categoryOf(n);
     if (v.kind === "tok" && ["const","expr"].includes(v.tok.t)) return; // reference to another constant
-    const strLen = (tok) => tok.x.slice(1, -1).replace(/\\./g, "x").length;
+    const strLen = tok => {try{return Buffer.byteLength(JSON.parse(tok.x),"utf8");}catch{return Buffer.byteLength(tok.x.slice(1,-1),"utf8");}};
     const inSize = (len, what) => {
       const sz = t.size;
       if (!sz) return;
@@ -504,6 +511,21 @@ function analyze(text, opts = {}) {
 }
 
 
+function applyPlanDiagnostics(report){
+ const emit=(token,m,sev=WARNING)=>{if(!report.diags.some(d=>d.s===token.s&&d.m===m))report.diags.push({s:token.s,e:token.e,m,sev});};
+ for(const st of report.structs){const p=report.plans.find(p=>p.name===st.name.x);if(!p)continue;
+  const w=ui.wire(st,p),minimum=w.minimumBytes,maximum=p.maximum,limit=p.maxDataSize??65535;
+  if(minimum!==null&&minimum>limit)emit(st.name,`Schema minimum ${minimum} B exceeds MAX_DATA_SIZE ${limit} B; no checked frame can be decoded`,ERROR);
+  else if(maximum!==null&&maximum>limit)emit(st.name,`Schema maximum ${maximum} B exceeds MAX_DATA_SIZE ${limit} B; larger frames will be rejected`);
+  if(p.memory?.objectBytes>65536)emit(st.name,`Rust object is ${p.memory.objectBytes} B; review stack placement or allocate the object explicitly`);
+  for(const f of st.fields.values()){
+   const text=["str","string","String"].includes(f.type.name.x),mode=f.modifiers.binary_opt;
+   if((mode!==undefined||f.modifiers.decompress!==undefined)&&!text)emit(f.name,"String modifiers are only valid on string/str fields",ERROR);
+   if(text&&mode==="inline"&&!f.type.size)emit(f.name,"inline string requires a finite byte range up to 65535",ERROR);
+   if(text&&["guard","view"].includes(mode))emit(f.name,mode==="guard"?"binary_opt=guard is compatibility syntax; COPY now uses String or aggressive inline storage":"binary_opt=view now borrows &str directly; no Utf8Guard is generated");
+  }
+ }
+}
 function offsetPosition(text,offset){const prior=text.slice(0,offset),last=prior.lastIndexOf("\n");return {line:(prior.match(/\n/g)||[]).length,character:offset-last-1};}
 function positionOffset(text,p){const lines=text.split("\n");let offset=0;for(let i=0;i<Math.min(p.line,lines.length);i++)offset+=lines[i].length+1;return offset+p.character;}
 const analyzerCapabilities=new Map();
@@ -511,12 +533,12 @@ function editorAnalysis(text,uri,opts={}) {
   const report=analyze(text,opts);
   const searchRoots=new Set(roots);try{let dir=path.dirname(fileURLToPath(uri));for(let i=0;i<6;i++){searchRoots.add(dir);const parent=path.dirname(dir);if(parent===dir)break;dir=parent;}}catch{}
   const executables=[opts.analyzerPath,process.env.QSL_ANALYZER,...[...searchRoots].flatMap(r=>[path.join(r,"qsl","target","release","qsl-analyze.exe"),path.join(r,"qsl","target","release","qsl-analyze"),path.join(r,"target","release","qsl-analyze.exe"),path.join(r,"target","release","qsl-analyze")])].filter(Boolean);
-  const command=executables.find(f=>fs.existsSync(f));report.analyzer=command||null;if(!command)return report;
+  const command=executables.find(f=>fs.existsSync(f));report.analyzer=command||null;if(!command){applyPlanDiagnostics(report);return report;}
   if(opts.kind!=="deq"){
     const modified=fs.statSync(command).mtimeMs;let cached=analyzerCapabilities.get(command);
     if(!cached||cached.modified!==modified){let capabilities={};try{const r=spawnSync(command,["--capabilities"],{input:"",encoding:"utf8",timeout:3000,windowsHide:true});capabilities=JSON.parse(r.stdout);}catch{}cached={modified,capabilities};analyzerCapabilities.set(command,cached);}
     report.nativeCapabilities=cached.capabilities;
-    if(cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.schemaHashVersion!==1||cached.capabilities.checkedSchemas!==1||cached.capabilities.optionalModes!==2||cached.capabilities.qpsCodecRevision!==2||cached.capabilities.qpsByteCodecRevision!==3){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
+    if(cached.capabilities.memoryLayout!==1||cached.capabilities.safetyOptIn!==1||cached.capabilities.editorBundle!==1||cached.capabilities.wireLayout!==1||cached.capabilities.schemaHashVersion!==1||cached.capabilities.checkedSchemas!==1||cached.capabilities.optionalModes!==2||cached.capabilities.qpsCodecRevision!==2||cached.capabilities.qpsByteCodecRevision!==3){const s=report.structs[0]?.name;report.diags.push({s:s?.s||0,e:s?.e||0,m:"Rebuild qsl-analyze with the matching QSL version and --features rust-macros; this binary does not support the source-bundle protocol",sev:2});return report;}
   }
   const deqs=[];
   const open=new Map();for(const [u,t] of opts.openDocs||[]){try{if(u.toLowerCase().endsWith(".deq"))open.set(path.resolve(fileURLToPath(u)).toLowerCase(),t);}catch{}}
@@ -536,10 +558,11 @@ function editorAnalysis(text,uri,opts={}) {
   const chunks=[],word=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n);return b;},add=s=>{const b=Buffer.from(s);chunks.push(word(b.length),b);};add(text);chunks.push(word(rust.length));for(const r of rust)add(r);
   let result;try{result=spawnSync(command,opts.kind==="deq"?["--deq-stdin"]:["--editor-bundle",...(opts.generate?["--generate"]:[]),...deqs],{input:opts.kind==="deq"?text:Buffer.concat(chunks),encoding:"utf8",timeout:3000,maxBuffer:8*1024*1024,windowsHide:true});}catch(error){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer failed: ${error.message}`});return report;}
   if(result.status!==0){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer failed: ${result.error?.message||result.stderr?.trim()||result.status}`});return report;}
-  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.generated=native.generated;report.rustMacros=native.rustMacros||[];report.diags=report.diags.filter(d=>!(native.rustMacros||[]).some(n=>d.m===`Unknown type '${n}'`));}
+  try{const native=JSON.parse(result.stdout);if(native.ok){report.plans=native.schemas||[];report.generated=native.generated;report.rustMacros=native.rustMacros||[];report.diags=report.diags.filter(d=>d.sev===WARNING&&!(native.rustMacros||[]).some(n=>d.m===`Unknown type '${n}'`));for(const d of native.diagnostics||[]){const at=Buffer.from(text).subarray(0,d.offset||0).toString("utf8").length;const schema=report.structs.find(s=>d.message.startsWith(s.name.x+": "));const field=report.structs.flatMap(s=>[...s.fields.values()]).find(f=>f.start<=at&&at<=f.end);report.diags.push({s:schema?.name.s??field?.type.size?.s??field?.start??Math.max(0,Math.min(at-1,text.length-1)),e:schema?.name.e??field?.type.size?.e??field?.end??Math.max(1,Math.min(at,text.length)),sev:ERROR,m:d.message});}}
     else{const byte=native.offset||Number(/at byte (\d+)/.exec(native.message)?.[1])||0,at=Buffer.from(text).subarray(0,byte).toString("utf8").length;
       report.plans=[];report.diags.push({s:Math.min(Math.max(0,at-1),Math.max(0,text.length-1)),e:Math.min(Math.max(1,at),text.length),m:native.message,sev:1});}
   }catch(error){report.diags.push({s:0,e:1,sev:2,m:`Native analyzer returned invalid JSON: ${error.message}`});}
+  applyPlanDiagnostics(report);
   for(const st of report.structs){const p=report.plans.find(p=>p.name===st.name.x);if(p?.qps&&!p.payloadQuantActive&&st.fields.size===1){const f=[...st.fields.values()][0];if(f.type.name.x==='u8'&&!report.diags.some(d=>d.s===f.name.s&&d.e===f.name.e&&d.m.startsWith('A single u8')))report.diags.push({s:f.name.s,e:f.name.e,sev:2,m:"A single u8 cannot benefit from grouping; exact QPS keeps raw data when framing costs more"});}}
   return report;
 }

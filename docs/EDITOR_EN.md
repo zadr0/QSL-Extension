@@ -1,3 +1,5 @@
+> **0.8:** the inspector now reports Rust object size, owned/borrowed bytes, exact register groups and native regions. STACK_LIMIT is strict for every inline buffer; Safety is opt-in; QPS is scalar-only. [Current contract and build](../README.md).
+
 # Interactive QSL analysis in Zed
 
 [Русский](EDITOR_RU.md)

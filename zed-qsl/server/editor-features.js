@@ -10,7 +10,7 @@ function sourceField(f,p){
   const fixed=s?.kind==="n",compressed=f.modifiers.decompress==="true",raw=f.type.optional&&(p.lengthGraph||p.stateBits);
   const header=fixed||raw?0:f.modifiers.binary_opt==="inline"||compressed?(hi<=127?1:hi<=32767?2:4):4;
   min=compressed?null:lo===null?null:(lo+header)*8;max=hi===null?null:(hi+header)*8;
-  rust=fixed?`[u8; ${hi??"N"}]`:f.modifiers.binary_opt==="guard"?"Utf8CopyGuard":f.modifiers.binary_opt==="inline"?`InlineString<${hi??"N"}>`:f.modifiers.binary_opt==="view"?"&str":f.modifiers.binary_opt==="true"||f.modifiers.binary_opt==="bytes"?"&[u8]":"String";
+  rust=fixed?`[u8; ${hi??"N"}]`:f.modifiers.binary_opt==="guard"?"String":f.modifiers.binary_opt==="inline"?`InlineString<${hi??"N"}>`:f.modifiers.binary_opt==="view"?"&str":f.modifiers.binary_opt==="true"||f.modifiers.binary_opt==="bytes"?"&[u8]":"String";
  }
  if(p.payloadQuantActive&&/^[ui](8|16|32|64)$/.test(n)&&s&&lo!==null&&hi!==null){let span=BigInt(hi)-BigInt(lo);min=max=span===0n?0:span.toString(2).length;}
  if(p.compact&&!p.payloadQuantActive){min=max=null;}
@@ -45,16 +45,23 @@ function table(headers,rows){return `| ${headers.map(md).join(" | ")} |\n| ${hea
 function fieldTable(st,p,lang,limit=8){const w=wire(st,p),rows=w.fields.slice(0,limit).map(f=>[`${f.name}${f.optional?"?":""}`,f.rustType,bitRange(f.offsetMinBits,f.offsetMaxBits,lang),bitRange(f.minBits,f.maxBits,lang)]);return table([t(lang,"field"),t(lang,"type"),t(lang,"offset"),t(lang,"size")],rows)+(w.fields.length>limit?`\n\n… +${w.fields.length-limit}`:"");}
 function schemaHover(st,p,lang,showFields=true){
  const w=wire(st,p),meta=bitRange(w.headerMinBits,w.headerMaxBits,lang);
- const rows=[[t(lang,"scalarQps"),p.qps?`Q${p.quantum} · ${t(lang,p.payloadQuantActive?"lossless":"rawFallback")}`:t(lang,"off")],[t(lang,"frame"),frameSize(st,p,lang)],[t(lang,"metadata"),meta],["RT",p.rtEligible?`${t(lang,p.rtEnabled?"on":"off")} · ${p.slots} ${t(lang,"slots")}`:t(lang,"rtMissing")],[t(lang,"validation"),t(lang,"on")],[t(lang,"dataLimit"),`${p.maxDataSize??65535} B`],["inline",diagnostic(p.inline,lang)],[t(lang,"source"),t(lang,p.approximate?"advisory":"native")]];
+ const rows=[[t(lang,"scalarQps"),p.qps?`Q${p.quantum} · ${t(lang,p.payloadQuantActive||p.scalarPrefix?"lossless":"rawFallback")}`:t(lang,"off")],[t(lang,"frame"),frameSize(st,p,lang)],[t(lang,"metadata"),meta],["RT",p.rtEligible?`${t(lang,p.rtEnabled?"on":"off")} · ${p.slots} ${t(lang,"slots")}`:t(lang,"rtMissing")],[t(lang,"validation"),t(lang,p.safety?"on":"off")],[t(lang,"dataLimit"),`${p.maxDataSize??65535} B`],["inline",diagnostic(p.inline,lang)],[t(lang,"source"),t(lang,p.approximate?"advisory":"native")]];
  rows.push(["predict_seq",t(lang,p.predictSequence?"on":"off")],["opt_table",t(lang,p.tagDispatch?"on":"off")]);
  if(p.hashes)rows.push([t(lang,"hashTitle"),`${p.hashes.algorithm} · v${p.hashes.version}${p.hashes.complete?"":` · ${t(lang,"unknown")}`}`]);
- if(p.qps)rows.push([t(lang,"wholeQps"),p.qpsByteAPI?`serialize_qps_to · ${p.qpsByteHeader||16} B ${t(lang,"envelope")}`:t(lang,"requiresSafety")]);
+ if(p.scalarPrefix)rows.push([t(lang,"scalarPrefix"),`${range(p.scalarPrefix.minimumBytes,p.scalarPrefix.maximumBytes,lang)} · ${p.scalarPrefix.lengthHeaderBytes} B ${t(lang,"prefixLength")}`]);
+ if(p.qps&&!p.scalarPrefix)rows.push([t(lang,"wholeQps"),p.qpsByteAPI?`serialize_qps_to · ${p.qpsByteHeader||16} B ${t(lang,"envelope")}`:t(lang,p.safety?"scalarOnly":"requiresSafety")]);
  if(p.stateBits)rows.push(["state_bits",`Q${p.stateBitsQuantum} · D ${p.dBits}/32 ${t(lang,"bits")}`]);
- if(p.payloadQuantRequested)rows.push([t(lang,"compression"),p.payloadQuantActive?`Q${p.payloadQuantum}: ${p.rawMaximum} → ${p.payloadMaximum} B · ${t(lang,"lossless")}`:diagnostic(p.payloadReason,lang)]);
+ if(p.payloadQuantRequested&&!p.scalarPrefix)rows.push([t(lang,"compression"),p.payloadQuantActive?`Q${p.payloadQuantum}: ${p.rawMaximum} → ${p.payloadMaximum} B · ${t(lang,"lossless")}`:diagnostic(p.payloadReason,lang)]);
+ if(p.memory){rows.splice(2,0,[t(lang,"objectMemory"),`${p.memory.objectBytes??"?"} B · ${p.memory.layout} · ${p.memory.target}`],[t(lang,"heapMemory"),range(p.memory.ownedDataMinimum,p.memory.ownedDataMaximum,lang)],[t(lang,"borrowMemory"),range(p.memory.borrowedDataMinimum,p.memory.borrowedDataMaximum,lang)]);}
  return `### ${md(p.name)}\n\n${table(["QSL",t(lang,"status")],rows)}\n\n${showFields?fieldTable(st,p,lang)+"\n\n":""}${t(lang,"sizeof")}`;
 }
+function memoryTable(p,lang){const m=p.memory;if(!m)return "";return `## ${t(lang,"objectMemory")}
+
+${table([t(lang,"field"),t(lang,"type"),t(lang,"nativeOffset"),t(lang,"objectMemory"),t(lang,"heapMemory"),t(lang,"borrowMemory")],m.fields.map(f=>[f.name,f.rustType,f.offset===null?"?":`${f.offset} B`,f.size===null?"?":`${f.size} B`,range(f.heapMinimum,f.heapMaximum,lang),range(f.borrowedMinimum,f.borrowedMaximum,lang)]))}
+
+${t(lang,"memoryNote")}`;}
 function hashTable(p,lang){const h=p.hashes;if(!h)return "";return `## ${t(lang,"hashTitle")}\n\n${table(["QSL",t(lang,"status")],[[t(lang,"hashAlgorithm"),`${h.algorithm} · ${h.bits} bits · v${h.version}`],[t(lang,"hashStrict"),`0x${h.strict}`],[t(lang,"hashLight"),`0x${h.light}`],[t(lang,"hashComplete"),t(lang,h.complete?"yes":"no")]])}\n\n${t(lang,"hashNote")}${h.complete?"":`\n\n${t(lang,"hashOpaque")}`}`;}
-function storage(f,lang){const ty=f.rustType;if(ty.includes("Utf8CopyGuard"))return t(lang,"copied");if(ty.includes("Guard")||ty.includes("&"))return t(lang,"borrowed");if(ty.includes("String")&&!ty.includes("Inline"))return t(lang,"owned");if(ty.includes("[u8;"))return t(lang,"fixed");return null;}
+function storage(f,lang){const ty=f.rustType;if(ty.includes("&"))return t(lang,"borrowed");if(ty.includes("StackString")||ty.includes("InlineString")||ty.includes("InlineArray")||ty.includes("[u8;"))return t(lang,"fixed");if(ty.includes("String"))return t(lang,"owned");return null;}
 function sourceFields(w,name){const direct=w.fields.find(f=>f.name===name);return direct?[direct]:w.fields.filter(f=>f.name.startsWith(name+"_"));}
 function fieldHover(st,p,name,lang){const w=wire(st,p),group=sourceFields(w,name),f=group[0];if(!f)return null;
  if(group.length>1)return `### ${md(st.name.x)}.${md(name)}\n\n${t(lang,"macroExpansion")}\n\n${table([t(lang,"field"),t(lang,"type"),t(lang,"offset"),t(lang,"size")],group.map(r=>[r.name,r.rustType,bitRange(r.offsetMinBits,r.offsetMaxBits,lang),bitRange(r.minBits,r.maxBits,lang)]))}`;
@@ -65,23 +72,26 @@ function maskNames(mask,fields){let value=BigInt(mask);return fields.filter((_,i
 function inspect(st,p,lang,eventsOnly=false){
  const w=wire(st,p),parts=[`# ${p.name} · ${t(lang,eventsOnly?"events":"layoutTitle")}`];
  if(!eventsOnly)parts.push(hashTable(p,lang),schemaHover(st,p,lang,false).replace(/^### .*\n\n/,""),`## ${t(lang,"fields")}`,fieldTable(st,p,lang,Infinity),`\`H = ${bitRange(w.headerMinBits,w.headerMaxBits,lang)}\``,t(lang,"layoutReason"));
+ if(!eventsOnly&&p.registerGroups?.length)parts.push(`## ${t(lang,"registerGroups")}`,table([t(lang,"fields"),t(lang,"offset"),t(lang,"exactRead"),t(lang,"registerBits")],p.registerGroups.map(g=>[w.fields.slice(g.firstField,g.firstField+g.fieldCount).map(f=>f.name).join(", "),g.wireOffset===null?t(lang,"dynamic"):`${g.wireOffset} B`,`${g.readBytes} B${g.metadataBytes?` · +${g.metadataBytes} B ${t(lang,"metadata")}`:""}`,g.registerBits])),t(lang,"registerNote"));
+ if(!eventsOnly&&p.nativeRegions?.length)parts.push(`## ${t(lang,"nativeRegions")}`,table([t(lang,"type"),t(lang,"fields")],p.nativeRegions.map(r=>[r.type,w.fields.slice(r.firstField,r.endField).map(f=>f.name).join(", ")])),t(lang,"regionNote"));
  const g=p.lengthGraph;if(g){parts.push(`## ${t(lang,"events")}`,`\`I(L) = ${formula(p)}\``,table(["I","L (B)",t(lang,"guaranteed"),t(lang,"possible"),t(lang,"valid")],g.events.map((e,i)=>[i,range(e.start,e.end,lang,"B"),maskNames(e.forced,w.fields.filter(f=>f.optional)),maskNames(e.possible,w.fields.filter(f=>f.optional)),t(lang,e.valid?"yes":"no")])));}
+ if(!eventsOnly&&p.memory)parts.push(memoryTable(p,lang));
  if(!eventsOnly)parts.push(`## ${t(lang,"strategy")}`,diagnostic(p.staticOptional&&p.staticOptional!=="disabled"?p.staticOptional:p.reason,lang),p.payloadQuantActive?`quant=Q${p.payloadQuantum} · ${p.rawMaximum} → ${p.payloadMaximum} B · ${t(lang,"padding")}: ${p.payloadPadding} B`:"",t(lang,"wireChange"));
  return parts.filter(Boolean).join("\n\n")+"\n";
 }
 function hints(report,text,lang,settings,pos){const out=[];if(settings.enabled===false)return out;
  for(const st of report.structs){const p=report.plans.find(p=>p.name===st.name.x);if(!p)continue;
-  if(settings.schemas!==false)out.push({position:pos(st.end),label:` ↔ ${frameSize(st,p,lang)}`,kind:1,paddingLeft:true,tooltip:{kind:"markdown",value:schemaHover(st,p,lang)}});
+  if(settings.schemas!==false)out.push({position:pos(st.end),label:` ↔ ${frameSize(st,p,lang)}${settings.memory!==false&&p.memory?` · ${t(lang,"objectShort")} ${p.memory.objectBytes??"?"} B${p.memory.ownedDataMaximum!==0?` · ${t(lang,"heapShort")} ${range(p.memory.ownedDataMinimum,p.memory.ownedDataMaximum,lang)}`:""}`:""}`,kind:1,paddingLeft:true,tooltip:{kind:"markdown",value:schemaHover(st,p,lang)}});
   if(settings.fields!==false)for(const f of st.fields.values()){const group=sourceFields(wire(st,p),f.name.x),row=group[0];if(!row)continue;if(group.length>1){out.push({position:pos(f.name.e),label:` ↦ ${group.length} ${t(lang,"expanded")}`,kind:1,paddingLeft:true,tooltip:{kind:"markdown",value:fieldHover(st,p,f.name.x,lang)}});continue;}const sizeKnown=row.minBits!==null||row.maxBits!==null,offsetKnown=row.offsetMinBits!==null||row.offsetMaxBits!==null;if(!sizeKnown&&(!offsetKnown||settings.offsets===false))continue;out.push({position:pos(f.name.e),label:`${sizeKnown?`: ${bitRange(row.minBits,row.maxBits,lang)}`:""}${settings.offsets===false||!offsetKnown?"":` @${bitRange(row.offsetMinBits,row.offsetMaxBits,lang)}`}`,kind:1,paddingLeft:true,tooltip:{kind:"markdown",value:fieldHover(st,p,f.name.x,lang)}});}
  }return out;
 }
-const attrs={opt_table:"optDoc",predict_seq:"predictDoc",qps:"qpsDoc",state_bits:"stateBitsDoc",quant:"quantDoc",inline:"inlineDoc",safety:"safetyDoc",lifetime:"fieldDoc",compact:"fieldDoc",alignment:"fieldDoc",optionals:"fieldDoc"};
+const attrs={opt_table:"optDoc",predict_seq:"predictDoc",qps:"qpsDoc",state_bits:"stateBitsDoc",quant:"quantDoc",inline:"inlineDoc",safety:"safetyDoc",aggressive:"aggressiveDoc",transmutate:"transmutateDoc",loyal_cache:"cacheDoc",slots:"slotsDoc",cache:"cacheDoc",lifetime:"fieldDoc",compact:"fieldDoc",alignment:"fieldDoc",optionals:"fieldDoc"};
 function completions(report,text,at,lang){const prefix=text.slice(0,at),line=prefix.slice(Math.max(prefix.lastIndexOf("{"),prefix.lastIndexOf(";"),prefix.lastIndexOf("}"))+1);let items=[];
  const item=(label,insert,key,kind=14)=>({label,kind,insertText:insert||label,documentation:{kind:"markdown",value:t(lang,key)}});
  if(/!config\s+[A-Z_]+\s*=\s*\w*$/.test(prefix)){
   const key=/!config\s+([A-Z_]+)\s*=\s*\w*$/.exec(prefix)[1];
-  items=(key==="USE_HASH"?["xxHash","xxHash128"]:key==="QSL_RT"?["true","false"]:key==="QSL_RT_DEFAULT"?["16"]:key==="MAX_DATA_SIZE"?["65535"]:[]).map(v=>item(v,v,key==="USE_HASH"?"hashDoc":key==="MAX_DATA_SIZE"?"limitDoc":"rtDoc"));
- }else if(/!config\s+\w*$/.test(prefix)){items=[item("USE_HASH","USE_HASH = xxHash;","hashDoc"),item("MAX_DATA_SIZE","MAX_DATA_SIZE = 65535;","limitDoc"),item("QSL_RT","QSL_RT = true;","rtDoc"),item("QSL_RT_DEFAULT","QSL_RT_DEFAULT = 16;","rtDoc")];}
+  items=(key==="USE_HASH"?["xxHash","xxHash128"]:key==="QSL_RT"?["true","false"]:key==="QSL_RT_DEFAULT"?["16"]:key==="STACK_LIMIT"?["256"]:key==="MAX_DATA_SIZE"?["65535"]:[]).map(v=>item(v,v,key==="USE_HASH"?"hashDoc":key==="MAX_DATA_SIZE"?"limitDoc":"rtDoc"));
+ }else if(/!config\s+\w*$/.test(prefix)){items=[item("STACK_LIMIT","STACK_LIMIT = 256;","stackDoc"),item("USE_HASH","USE_HASH = xxHash;","hashDoc"),item("MAX_DATA_SIZE","MAX_DATA_SIZE = 65535;","limitDoc"),item("QSL_RT","QSL_RT = true;","rtDoc"),item("QSL_RT_DEFAULT","QSL_RT_DEFAULT = 16;","rtDoc")];}
  else if(/\[[^\]]*$/.test(line)){const key=/([a-z_]+)\s*=\s*\w*$/.exec(line)?.[1];if(key){const values={inline:["hint","always","never"],opt_table:["static","legacy"],quant:["Q2","Q4","Q8","Q16"],qps:["Q2","Q4","Q8","Q16"],state_bits:["Q1","Q2","Q4","Q8","Q16"],optionals:["bitmap"]}[key]||[];items=values.map(v=>item(v,v,attrs[key]||"fieldDoc"));}else items=Object.entries(attrs).map(([a,key])=>item(a,a,key));}
  else if(/\|[^|]*$/.test(line)){const key=/([a-z_]+)\s*=\s*\w*$/.exec(line)?.[1];items=key==="binary_opt"?["guard","view","true","false","inline"].map(v=>item(v,v,"guardDoc")):key==="decompress"?["true","false"].map(v=>item(v,v,"fieldDoc")):[item("binary_opt=guard","binary_opt=guard","guardDoc"),item("decompress=true","decompress=true","fieldDoc")];}
  else{items=[...(["u8","u16","u32","u64","i8","i16","i32","i64"].map(n=>item(n,n,"fieldDoc",7))),item("str","str","boundedDoc",7),...report.structs.map(s=>item(s.name.x,s.name.x,"fieldDoc",22))];}

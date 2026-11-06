@@ -38,7 +38,7 @@ for(const lang of ["ru","en"])test(`LSP ${lang}: inlays, compact field hover, ou
   const symbols=await c.request("textDocument/documentSymbol",{textDocument:{uri}});assert.equal(symbols[0].children.length,3);
   const completion=await c.request("textDocument/completion",{textDocument:{uri},position:{line:0,character:source.indexOf("opt_table")}});assert(completion.items.some(i=>i.label==="opt_table"));
   const wrong="&Bad{u32(9..1) id;u8? a;u64 after;}";c.send({method:"textDocument/didChange",params:{textDocument:{uri,version:2},contentChanges:[{text:wrong}]}});
-  const errors=(await c.wait(m=>m.method==="textDocument/publishDiagnostics"&&m.params.version===2)).params.diagnostics;assert(errors.some(d=>d.severity===1));assert(errors.every(d=>d.range.end.character>d.range.start.character));assert(errors.some(d=>lang==="ru"?/диапазон|диапазона|предшествовать/.test(d.message):/Range start|precede/.test(d.message)));
+  const errors=(await c.wait(m=>m.method==="textDocument/publishDiagnostics"&&m.params.version===2)).params.diagnostics;assert(errors.some(d=>d.severity===1));assert(errors.every(d=>d.range.end.character>d.range.start.character));assert(errors.some(d=>lang==="ru"?/диапазон|диапазона|предшествовать/.test(d.message):/Range start|precede|invalid numeric range/.test(d.message)));
   assert.equal((await c.request("textDocument/inlayHint",{textDocument:{uri}})).length,0);
   c.send({method:"textDocument/didChange",params:{textDocument:{uri,version:3},contentChanges:[{text:source}]}});assert.equal((await c.wait(m=>m.method==="textDocument/publishDiagnostics"&&m.params.version===3)).params.diagnostics.length,0);
   c.send({method:"workspace/didChangeConfiguration",params:{settings:{language:lang==="ru"?"en":"ru",inlayHints:{enabled:false}}}});assert.equal((await c.request("textDocument/inlayHint",{textDocument:{uri}})).length,0);
@@ -74,4 +74,27 @@ test("native schema hashes: names, storage, config and layout inspector",{skip:!
  assert(native128.ok);assert.equal(native128.schemas[0].hashes.bits,128);assert.equal(native128.schemas[0].hashes.light.length,32);
  for(const lang of ["ru","en"]){const inspected=ui.inspect(a.structs[0],a.plans[0],lang);assert(inspected.includes(h.strict));assert(inspected.includes(h.light));assert.match(inspected,lang==="ru"?/Строгий хэш/:/Strict hash/);}
  const opaque=editorAnalysis("&P{External value;}",uri,{analyzerPath:native}).plans[0];assert.equal(opaque.hashes.complete,false);
+});
+
+test("native modernization: strict inline limits, object memory and exact register windows",{skip:!fs.existsSync(native)},()=>{
+ const text="&Plain[safety]{u32 id;str(1..100) text;array<u8>(0..16) data;u8? a;u16? b;} &Stack[aggressive,safety]{u32 id;str(1..100) text;array<u8>(0..16) data;u8? a;u16? b;} &Heap[safety,aggressive]{str(1..1024) text|binary_opt=inline|;array<u16>(200) values;} &Nine[safety]{u64 id;str(1..100) text|binary_opt=inline|;}";
+ const r=editorAnalysis(text,uri,{analyzerPath:native});assert.equal(r.diags.filter(d=>d.sev===1).length,0,JSON.stringify(r.diags));const [plain,stack,heap,nine]=r.plans;
+ assert.equal(plain.memory.objectBytes,64);assert.equal(stack.memory.objectBytes,136);assert.equal(stack.memory.ownedDataMaximum,0);assert.equal(heap.memory.objectBytes,48);assert.equal(heap.memory.ownedDataMaximum,1424);assert.equal(heap.memory.fields[0].rustType,"String");assert.equal(nine.registerGroups[0].readBytes,9);assert.equal(nine.registerGroups[0].registerBits,128);assert.equal(nine.registerGroups[0].metadataBytes,1);assert.equal(heap.stackLimit,256);
+ for(const language of ["en","ru"]){const st=r.structs.find(s=>s.name.x==="Nine"),doc=ui.inspect(st,nine,language);assert.match(doc,/9 B/);assert.match(doc,/128/);assert(!doc.includes("undefined"));}
+});
+test("native recovery keeps valid schemas visible beside multiple errors",{skip:!fs.existsSync(native)},()=>{
+ const text="// Схемы: 😀\n&Good[safety]{u32 id;} &Bad{str(20..3) broken;} &AlsoBad{u32(5..1) value;} &Tail{str(1..2) name|decompress=no|;} &Last{str(2..10) text;}";
+ const r=editorAnalysis(text,uri,{analyzerPath:native}),errors=r.diags.filter(d=>d.sev===1);assert.deepEqual(r.plans.map(p=>p.name),["Good","Last"]);assert(errors.length>=3);assert(errors.every(d=>d.s>=0&&d.e<=text.length));
+});
+test("QPS mixes only scalar prefixes and always leaves lengths native",{skip:!fs.existsSync(native)},()=>{
+ const r=editorAnalysis("&Mix[qps,safety]{u64(0..15) a;u64(0..15) b;str(1..100) text;array<u32>(0..4) data;}",uri,{analyzerPath:native});assert.equal(r.diags.filter(d=>d.sev===1).length,0,JSON.stringify(r.diags));const p=r.plans[0];assert.equal(p.scalarPrefix.fieldCount,2);assert.equal(p.scalarPrefix.maximumBytes,1);assert.equal(p.qpsByteAPI,false);assert.equal(p.payloadPadding,0);
+ const bad=editorAnalysis("&Bad[qps]{str(1..10) text;u64(0..15) id;}",uri,{analyzerPath:native});assert(bad.diags.some(d=>d.sev===1&&/must precede/.test(d.m)));
+});
+
+test("native Rust regions accept primitive arrays and reject incompatible repr",{skip:!fs.existsSync(native)},()=>{
+ const modelUri=pathToFileURL(path.resolve(__dirname,"editor-fixture/native.rs")).href;
+ const good="#[qsl::schem_macro(aggressive_transmutate)] pub struct ArrayMeta {pub values:[u16;3]}";
+ const source="&A[safety]{ArrayMeta meta;str(1..8) text;}";
+ const r=editorAnalysis(source,uri,{analyzerPath:native,openDocs:new Map([[modelUri,good]])});assert.equal(r.diags.filter(d=>d.sev===1).length,0,JSON.stringify(r.diags));assert.equal(r.plans[0].nativeRegions[0].type,"ArrayMeta");assert.equal(r.plans[0].memory.fields[0].size,6);
+ const bad=editorAnalysis(source,uri,{analyzerPath:native,openDocs:new Map([[modelUri,good.replace("pub struct","#[repr(C,packed)] pub struct")]])});assert(bad.diags.some(d=>d.sev===1&&/repr\(C\)/.test(d.m)));
 });

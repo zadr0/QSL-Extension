@@ -50,7 +50,7 @@ test("exact numerical payload plans retain both operands and show raw fallback",
   const fields="{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64(0..15) d;}";
   for(const q of [2,4,8,16]){
     const a=analyze(`&A[quant=Q${q},safety]`+fields);assert.equal(a.diags.filter(d=>d.sev===1).length,0,JSON.stringify(a.diags));
-    assert.equal(a.plans[0].payloadQuantActive,true);assert.equal(a.plans[0].maximum,2);assert.equal(a.plans[0].payloadPadding,1);assert.match(describe(a.plans[0]),/quotient and remainder retained/);
+    assert.equal(a.plans[0].payloadQuantActive,true);assert.equal(a.plans[0].maximum,2);assert.equal(a.plans[0].payloadPadding,0);assert.match(describe(a.plans[0]),/quotient and remainder retained/);
   }
   assert.equal(analyze("&A[quant=Q16]{u64 a;}").plans[0].payloadQuantActive,false);
   assert(analyze("&A[quant=Q3]{u64 a;}").diags.some(d=>d.sev===1));
@@ -60,7 +60,7 @@ test("native payload and static graph plans match the generator",{skip:!fs.exist
   try{
     const result=editorAnalysis("&A[quant=Q16,opt_table,safety]{u64(0..15) a;u64(0..15) b;u64(0..15) c;u64?(0..15) d;}","file:///tmp/quant.qsl",{kind:"qsl"});
     assert.equal(result.diags.filter(d=>d.sev===1).length,0,JSON.stringify(result.diags));const p=result.plans[0];
-    assert.equal(p.payloadQuantActive,true);assert.equal(p.maximum,3);assert.equal(p.payloadPadding,1);assert.match(p.staticOptional,/no wire tags/);assert.equal(p.tagDispatch,false);
+    assert.equal(p.payloadQuantActive,true);assert.equal(p.maximum,3);assert.equal(p.payloadPadding,0);assert.match(p.staticOptional,/no wire tags/);assert.equal(p.tagDispatch,false);
   }finally{if(old===undefined)delete process.env.QSL_ANALYZER;else process.env.QSL_ANALYZER=old;}
 });
 test("native generator plans agree with advisory quantum analysis",{skip:!fs.existsSync(native)},()=>{
@@ -137,8 +137,8 @@ test("schema hash config validation and bilingual completions",()=>{
   assert.match(i18n.diagnostic("USE_HASH expects xxHash or xxHash128","ru"),/принимает/);
 });
 
-test("universal checked schemas and native maximum data config",()=>{
- const a=analyze("&P{str text;}");assert.equal(a.plans[0].safety,true);assert.equal(a.plans[0].maxDataSize,65535);assert.equal(a.plans[0].qpsByteAPI,true);
+test("checked deserialization is opt-in and maximum data config is bounded",()=>{
+ const a=analyze("&P{str text;}");assert.equal(a.plans[0].safety,false);assert.equal(a.plans[0].maxDataSize,65535);assert.equal(a.plans[0].qpsByteAPI,false);assert.equal(analyze("&P[safety]{u64 id;}").plans[0].qpsByteAPI,true);
  assert.equal(analyze("!config MAX_DATA_SIZE = 65535;",{kind:"deq"}).diags.length,0);
  const prefix="!config MAX_DATA_SIZE = ",ui=require("./editor-features");assert(ui.completions(a,prefix,prefix.length,"ru").items.some(i=>i.label==="65535"));
  assert(analyze("!config MAX_DATA_SIZE = 0;",{kind:"deq"}).diags.some(d=>d.sev===1));
